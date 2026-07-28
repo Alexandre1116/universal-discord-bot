@@ -8,12 +8,13 @@ Este documento explica os passos e regras para desenvolveres o teu próprio plug
 
 ## 1. Estrutura do Repositório
 
-O teu repositório (ou pasta do plugin) necessita obrigatoriamente de, pelo menos, dois ficheiros na raiz:
+O teu repositório (ou pasta do plugin) necessita obrigatoriamente de, pelo menos, três ficheiros na raiz:
 
 ```text
 omeu-plugin-discord/
 ├── plugin.json       # Ficheiro de metadados obrigatório
 ├── index.js          # Ficheiro principal onde o código será exportado
+├── LICENSE           # Obrigatório: O código tem de ser Open-Source (ex: MIT, GPL)
 ├── package.json      # (Opcional) Apenas se precisares de dependências extra do NPM
 └── ui/               # (Opcional) Ficheiros HTML/JS para integrares na Dashboard
     └── tab.html
@@ -104,5 +105,6 @@ Ao fazeres isto:
 ## 5. Partilha o teu Plugin!
 
 1. Coloca a tua pasta num **Repositório Público do GitHub**.
-2. Partilha o Link! Exemplo: `https://github.com/TeuUser/omeu-plugin-discord`
-3. Qualquer utilizador do **Universal Discord Bot** pode agora ir à sua Dashboard > Aba Plugins > Clicar em "Instalar via Github" e colocar o teu link. O bot faz o clone, instala as dependências do `package.json` e o teu plugin ganha vida sem ser preciso mexer numa linha de código! 🎉
+2. Certifica-te que incluis o ficheiro `LICENSE` (ex: Licença MIT). **O bot irá rejeitar a instalação se o código não for explicitamente Open-Source!**
+3. Partilha o Link! Exemplo: `https://github.com/TeuUser/omeu-plugin-discord`
+4. Qualquer utilizador do **Universal Discord Bot** pode agora ir à sua Dashboard > Aba Plugins > Clicar em "Instalar via Github" e colocar o teu link. O bot faz o clone, instala as dependências do `package.json` e o teu plugin ganha vida sem ser preciso mexer numa linha de código! 🎉

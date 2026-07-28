@@ -54,7 +54,35 @@ function installPluginFromGithub(url) {
     console.log(`[PLUGIN MANAGER] A clonar repositório: ${url}`);
     execSync(`git clone ${url} "${pluginPath}"`, { stdio: 'inherit' });
 
-    // 4. Instalar dependências se houver package.json
+    // 4. Validar Licença Open-Source
+    const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
+    let licenseFound = false;
+    let licenseContent = '';
+
+    for (const file of licenseFiles) {
+      const lPath = path.join(pluginPath, file);
+      if (fs.existsSync(lPath)) {
+        licenseFound = true;
+        licenseContent = fs.readFileSync(lPath, 'utf8').toUpperCase();
+        break;
+      }
+    }
+
+    if (!licenseFound) {
+      fs.rmSync(pluginPath, { recursive: true, force: true });
+      throw new Error('Instalação rejeitada: O repositório não contém um ficheiro LICENSE (Licença Open-Source obrigatória).');
+    }
+
+    // Verificar termos comuns de licenças open-source
+    const openSourceKeywords = ['MIT', 'APACHE', 'GPL', 'BSD', 'ISC', 'DO WHAT THE FUCK YOU WANT', 'MOZILLA', 'UNLICENSE'];
+    const isOpenSource = openSourceKeywords.some(kw => licenseContent.includes(kw));
+
+    if (!isOpenSource) {
+      fs.rmSync(pluginPath, { recursive: true, force: true });
+      throw new Error('Instalação rejeitada: A licença encontrada não parece ser uma licença Open-Source válida (MIT, GPL, Apache, etc).');
+    }
+
+    // 5. Instalar dependências se houver package.json
     const packagePath = path.join(pluginPath, 'package.json');
     if (fs.existsSync(packagePath)) {
       console.log(`[PLUGIN MANAGER] A instalar dependências para o plugin ${repoName}...`);
