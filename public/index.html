@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discord Core — Bot Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- LOGIN MODAL -->
+  <div id="loginModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <i class="fa-brands fa-discord" style="font-size: 2rem; color: var(--accent-purple); margin-bottom: 10px;"></i>
+        <h2>Discord Core</h2>
+        <p>Inicia sessão para aceder ao painel</p>
+      </div>
+      <form id="formLogin">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="loginUsername" class="form-control" required placeholder="admin">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" class="form-control" required placeholder="••••••••">
+        </div>
+        <button type="submit" class="btn btn-primary full-width" style="margin-top: 10px;">Entrar no Dashboard</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-layout">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon"><i class="fa-brands fa-discord"></i></div>
+        <div class="brand-text"><h2>Discord Core</h2><span>Bot Dashboard</span></div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-dashboard"><i class="fa-solid fa-chart-pie"></i><span>Dashboard</span></button>
+        <button class="nav-item" data-tab="tab-join"><i class="fa-solid fa-user-plus"></i><span>Entradas</span></button>
+        <button class="nav-item" data-tab="tab-leave"><i class="fa-solid fa-user-minus"></i><span>Saídas</span></button>
+        <button class="nav-item" data-tab="tab-voice"><i class="fa-solid fa-microphone-lines"></i><span>Canais de Voz</span></button>
+        <div class="nav-divider"></div>
+        <button class="nav-item" data-tab="tab-modules"><i class="fa-solid fa-puzzle-piece"></i><span>Módulos</span></button>
+        <div class="nav-divider"></div>
+        <button class="nav-item" data-tab="tab-moderation"><i class="fa-solid fa-shield-halved"></i><span>Moderação</span></button>
+        <button class="nav-item" data-tab="tab-customcmds"><i class="fa-solid fa-message"></i><span>Auto-Respostas</span></button>
+        <button class="nav-item" data-tab="tab-notifications"><i class="fa-brands fa-youtube"></i><span>Notificações</span></button>
+        <button class="nav-item" data-tab="tab-audit"><i class="fa-solid fa-clipboard-list"></i><span>Audit Logs</span></button>
+        <button class="nav-item" data-tab="tab-tickets"><i class="fa-solid fa-ticket"></i><span>Tickets</span></button>
+        <button class="nav-item" data-tab="tab-reactionroles"><i class="fa-solid fa-masks-theater"></i><span>Reaction Roles</span></button>
+        <button class="nav-item" data-tab="tab-levels"><i class="fa-solid fa-ranking-star"></i><span>Níveis / XP</span></button>
+        <button class="nav-item" data-tab="tab-embeds"><i class="fa-solid fa-envelope-open-text"></i><span>Embeds</span></button>
+        <button class="nav-item" data-tab="tab-giveaways"><i class="fa-solid fa-gift"></i><span>Giveaways</span></button>
+        <button class="nav-item" data-tab="tab-stats"><i class="fa-solid fa-chart-line"></i><span>Estatísticas</span></button>
+        <div class="nav-divider"></div>
+        <button class="nav-item" data-tab="tab-settings"><i class="fa-solid fa-gear"></i><span>Definições</span></button>
+      </nav>
+
+      <div class="sidebar-status-card" id="botStatusCard">
+        <div class="status-indicator offline" id="statusDot"></div>
+        <div class="status-info"><h4 id="botNameText">Desconectado</h4><span id="botPingText">Status: Off</span></div>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main-content">
+      <header class="top-header">
+        <div class="header-title"><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">Visão geral do Bot</p></div>
+        <div class="header-actions">
+          <button class="btn btn-outline" id="btnRefresh"><i class="fa-solid fa-rotate-right"></i> Atualizar</button>
+          <button class="btn btn-danger" id="btnLogout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sair</button>
+        </div>
+      </header>
+
+      <div id="toastNotification" class="toast hidden"><i class="fa-solid fa-circle-check"></i><span id="toastMessage">OK!</span></div>
+
+      <!-- TAB: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-content active">
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-icon purple"><i class="fa-brands fa-discord"></i></div><div class="stat-data"><span class="stat-label">Estado</span><h3 id="dashBotStatus" class="stat-value">---</h3></div></div>
+          <div class="stat-card"><div class="stat-icon green"><i class="fa-solid fa-server"></i></div><div class="stat-data"><span class="stat-label">Servidores</span><h3 id="dashGuildsCount" class="stat-value">0</h3></div></div>
+          <div class="stat-card"><div class="stat-icon blue"><i class="fa-solid fa-wifi"></i></div><div class="stat-data"><span class="stat-label">Ping</span><h3 id="dashPing" class="stat-value">--</h3></div></div>
+          <div class="stat-card"><div class="stat-icon orange"><i class="fa-solid fa-microphone"></i></div><div class="stat-data"><span class="stat-label">Voice Hubs</span><h3 id="dashVoiceHubsCount" class="stat-value">0</h3></div></div>
+        </div>
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-network-wired"></i> Servidores</h3><span class="badge" id="guildsBadge">0</span></div><div class="card-body"><div id="guildsList" class="guilds-grid"><div class="empty-state"><i class="fa-solid fa-circle-notch fa-spin"></i><p>A carregar...</p></div></div></div></div>
+
+        <div class="content-card" style="margin-top:20px;">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-terminal"></i> Consola em Tempo Real</h3>
+          </div>
+          <div class="card-body">
+            <div id="logsTerminal" style="background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 15px; height: 300px; overflow-y: auto; border-radius: 8px; font-size: 13px;">
+              Carregando logs...
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: JOIN -->
+      <section id="tab-join" class="tab-content">
+        <div class="split-layout">
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-user-plus"></i> Mensagem de Entrada</h3><label class="toggle-switch"><input type="checkbox" id="joinEnabled"><span class="slider"></span></label></div><div class="card-body">
+            <form id="formJoinConfig">
+              <div class="form-group"><label for="joinChannelSelect">Canal</label><select id="joinChannelSelect" class="form-control"><option value="">A carregar...</option></select></div>
+              <div class="form-group"><label for="joinMessageType">Formato</label><select id="joinMessageType" class="form-control"><option value="embed">Embed</option><option value="text">Texto</option></select></div>
+              <div class="form-group"><label for="joinEmbedTitle">Título</label><input type="text" id="joinEmbedTitle" class="form-control" placeholder="👋 Novo Membro!"></div>
+              <div class="form-group"><label for="joinContent">Conteúdo</label><textarea id="joinContent" class="form-control" rows="3" placeholder="Bem-vindo {user}!"></textarea><small class="form-help">Variáveis: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{count}</code></small></div>
+              <div class="form-row"><div class="form-group half"><label>Cor</label><div class="color-picker-wrapper"><input type="color" id="joinEmbedColorPicker" value="#5865F2"><input type="text" id="joinEmbedColor" class="form-control" value="#5865F2"></div></div><div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="joinShowAvatar" checked><span>Mostrar Avatar</span></label></div></div>
+              <div class="form-row"><div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="joinGenerateImage"><span>Gerar Imagem de Boas-Vindas</span></label><small class="form-help">Cria uma imagem bonita usando Canvas.</small></div><div class="form-group half"><label>URL Imagem de Fundo (Opcional)</label><input type="text" id="joinImageBackgroundUrl" class="form-control" placeholder="https://exemplo.com/fundo.png"></div></div>
+              <div class="form-actions"><button type="button" class="btn btn-outline" id="btnTestJoin"><i class="fa-solid fa-paper-plane"></i> Testar</button><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+            </form>
+          </div></div>
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-eye"></i> Pré-Visualização</h3></div><div class="card-body discord-preview-container"><div class="discord-message"><img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/0.png" alt=""><div class="discord-message-content"><div class="discord-author"><span class="bot-name">Discord Core</span><span class="bot-tag">BOT</span><span class="timestamp">Hoje</span></div><div id="prevJoinTextOnly" class="discord-text hidden"></div><div id="prevJoinEmbed" class="discord-embed"><div class="discord-embed-color-bar" id="prevJoinBar" style="background:#5865F2"></div><div class="discord-embed-inner"><h4 id="prevJoinTitle" class="embed-title">👋 Novo Membro!</h4><p id="prevJoinDesc" class="embed-desc">Bem-vindo!</p><img id="prevJoinThumb" class="embed-thumb" src="https://cdn.discordapp.com/embed/avatars/0.png" alt=""></div></div></div></div></div></div>
+        </div>
+      </section>
+
+      <!-- TAB: LEAVE -->
+      <section id="tab-leave" class="tab-content">
+        <div class="split-layout">
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-user-minus"></i> Mensagem de Saída</h3><label class="toggle-switch"><input type="checkbox" id="leaveEnabled"><span class="slider"></span></label></div><div class="card-body">
+            <form id="formLeaveConfig">
+              <div class="form-group"><label for="leaveChannelSelect">Canal</label><select id="leaveChannelSelect" class="form-control"><option value="">A carregar...</option></select></div>
+              <div class="form-group"><label for="leaveMessageType">Formato</label><select id="leaveMessageType" class="form-control"><option value="embed">Embed</option><option value="text">Texto</option></select></div>
+              <div class="form-group"><label for="leaveEmbedTitle">Título</label><input type="text" id="leaveEmbedTitle" class="form-control" placeholder="🚪 Membro Saiu"></div>
+              <div class="form-group"><label for="leaveContent">Conteúdo</label><textarea id="leaveContent" class="form-control" rows="3"></textarea><small class="form-help">Variáveis: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{count}</code></small></div>
+              <div class="form-row"><div class="form-group half"><label>Cor</label><div class="color-picker-wrapper"><input type="color" id="leaveEmbedColorPicker" value="#ED4245"><input type="text" id="leaveEmbedColor" class="form-control" value="#ED4245"></div></div><div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="leaveShowAvatar" checked><span>Mostrar Avatar</span></label></div></div>
+              <div class="form-actions"><button type="button" class="btn btn-outline" id="btnTestLeave"><i class="fa-solid fa-paper-plane"></i> Testar</button><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+            </form>
+          </div></div>
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-eye"></i> Pré-Visualização</h3></div><div class="card-body discord-preview-container"><div class="discord-message"><img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/1.png" alt=""><div class="discord-message-content"><div class="discord-author"><span class="bot-name">Discord Core</span><span class="bot-tag">BOT</span><span class="timestamp">Hoje</span></div><div id="prevLeaveTextOnly" class="discord-text hidden"></div><div id="prevLeaveEmbed" class="discord-embed"><div class="discord-embed-color-bar" id="prevLeaveBar" style="background:#ED4245"></div><div class="discord-embed-inner"><h4 id="prevLeaveTitle" class="embed-title">🚪 Membro Saiu</h4><p id="prevLeaveDesc" class="embed-desc">Membro saiu.</p><img id="prevLeaveThumb" class="embed-thumb" src="https://cdn.discordapp.com/embed/avatars/1.png" alt=""></div></div></div></div></div></div>
+        </div>
+      </section>
+
+      <!-- TAB: VOICE HUBS -->
+      <section id="tab-voice" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-microphone-lines"></i> Canais de Voz Dinâmicos</h3><span class="badge badge-info">Cópia Exata</span></div><div class="card-body">
+          <p class="description-text">Define canais Hub. Quando alguém entra, o bot clona o canal e move o utilizador.</p>
+          <form id="formAddVoiceHub" class="hub-creation-form">
+            <div class="form-row"><div class="form-group half"><label>Canal Hub</label><select id="voiceHubSelect" class="form-control" required><option value="">A carregar...</option></select></div><div class="form-group half"><label>Nome Clonado</label><input type="text" id="voiceNamePattern" class="form-control" value="🔊 Canal de {user}"><small class="form-help">Variáveis: <code>{user}</code> <code>{channel}</code></small></div></div>
+            <div class="form-row"><div class="form-group half"><label>Limite de Utilizadores</label><input type="number" id="voiceUserLimit" class="form-control" min="0" max="99" value="0"><small class="form-help">0 = copiar do original</small></div><div class="form-group half flex-end"><button type="submit" class="btn btn-primary full-width"><i class="fa-solid fa-plus"></i> Adicionar Hub</button></div></div>
+          </form>
+          <hr class="divider">
+          <h4><i class="fa-solid fa-list-check"></i> Hubs Configurados</h4>
+          <div id="voiceHubsList" class="hubs-list"><div class="empty-state"><i class="fa-solid fa-microphone-slash"></i><p>Nenhum hub configurado.</p></div></div>
+        </div></div>
+      </section>
+
+      <!-- TAB: MÓDULOS -->
+      <section id="tab-modules" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Módulos (Ligar/Desligar Funcionalidades)</h3></div><div class="card-body">
+          <p class="description-text">Ativa ou desativa as várias funcionalidades do bot.</p>
+          <form id="formModules">
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modModeration"><span>Moderação</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modUtility"><span>Utilidade</span></label></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modLevels"><span>Níveis / XP (Texto e Voz)</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modReactionRoles"><span>Reaction Roles</span></label></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modGiveaway"><span>Sorteios (Giveaways)</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modTickets"><span>Tickets</span></label></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modWelcome"><span>Boas-Vindas & Despedidas</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modCustomCommands"><span>Auto-Respostas</span></label></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modMusic"><span>Música (DisTube)</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modNotifications"><span>Notificações (YouTube)</span></label></div>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Módulos</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: MODERAÇÃO -->
+      <section id="tab-moderation" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-shield-halved"></i> Auto-Moderação</h3><label class="toggle-switch"><input type="checkbox" id="modEnabled"><span class="slider"></span></label></div><div class="card-body">
+          <form id="formModeration">
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modAntiSpam"><span>🚫 Anti-Spam</span></label><small class="form-help">Silencia membros que enviam mensagens muito rapidamente.</small></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modAntiLinks"><span>🔗 Anti-Links</span></label><small class="form-help">Apaga mensagens com links automaticamente.</small></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modAntiCaps"><span>🔠 Anti-Caps</span></label><small class="form-help">Apaga mensagens com uso excessivo de CAPS LOCK.</small></div>
+              <div class="form-group half"></div>
+            </div>
+            <div class="form-group"><label for="modBannedWords">Palavras Proibidas (uma por linha)</label><textarea id="modBannedWords" class="form-control" rows="4" placeholder="palavra1&#10;palavra2&#10;etc"></textarea></div>
+            <div class="form-row">
+              <div class="form-group half"><label for="modMaxStrikes">Máx. de Avisos (Strikes)</label><input type="number" id="modMaxStrikes" class="form-control" min="1" max="20" value="3"></div>
+              <div class="form-group half"><label for="modStrikeAction">Ação ao atingir máximo</label><select id="modStrikeAction" class="form-control"><option value="mute">🔇 Mute (24h)</option><option value="kick">👢 Kick</option><option value="ban">🔨 Ban</option></select></div>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: AUTO-RESPOSTAS -->
+      <section id="tab-customcmds" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-message"></i> Comandos Personalizados / Auto-Respostas</h3></div><div class="card-body">
+          <p class="description-text">O bot responde automaticamente sempre que alguém disser uma certa palavra ou comando.</p>
+          <form id="formCustomCmds">
+            <div id="customCmdsList" class="rr-roles-container"></div>
+            <button type="button" class="btn btn-outline" id="btnAddCustomCmd" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Comando</button>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Comandos</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: NOTIFICAÇÕES -->
+      <section id="tab-notifications" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-brands fa-youtube"></i> Notificações (YouTube)</h3></div><div class="card-body">
+          <p class="description-text">O bot verifica automaticamente novos vídeos e avisa no canal escolhido.</p>
+          <form id="formNotifications">
+            <div id="notificationsList" class="rr-roles-container"></div>
+            <button type="button" class="btn btn-outline" id="btnAddNotification" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Canal YouTube</button>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Notificações</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: AUDIT LOGS -->
+      <section id="tab-audit" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-clipboard-list"></i> Logs de Auditoria</h3><label class="toggle-switch"><input type="checkbox" id="auditEnabled"><span class="slider"></span></label></div><div class="card-body">
+          <form id="formAuditLog">
+            <div class="form-group"><label>Canal de Logs</label><select id="auditChannelSelect" class="form-control"><option value="">Selecionar canal...</option></select></div>
+            <h4>Eventos a registar:</h4>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="auditMsgDelete" checked><span>🗑️ Mensagens Apagadas</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="auditMsgEdit" checked><span>✏️ Mensagens Editadas</span></label></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="auditBans" checked><span>🔨 Bans</span></label></div>
+              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="auditVoice" checked><span>🔊 Entradas/Saídas de Voz</span></label></div>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: TICKETS -->
+      <section id="tab-tickets" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-ticket"></i> Sistema de Tickets</h3></div><div class="card-body">
+          <p class="description-text">Configura o sistema de tickets de suporte. Usa <code>/ticket-setup</code> no Discord para criar o painel com o botão.</p>
+          <form id="formTickets">
+            <div class="form-group"><label>Cargo de Suporte</label><select id="ticketSupportRole" class="form-control"><option value="">Selecionar cargo...</option></select><small class="form-help">Membros com este cargo terão acesso aos tickets.</small></div>
+            <div class="form-group"><label>Categoria para Tickets</label><select id="ticketCategory" class="form-control"><option value="">Selecionar categoria...</option></select></div>
+            <div class="form-group"><label>Canal de Transcrições</label><select id="ticketLogChannel" class="form-control"><option value="">Selecionar canal...</option></select><small class="form-help">Onde as transcrições de tickets fechados são enviadas.</small></div>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+          </form>
+        </div></div>
+      </section>
+
+      <!-- TAB: REACTION ROLES -->
+      <section id="tab-reactionroles" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-masks-theater"></i> Reaction Roles</h3></div><div class="card-body">
+          <p class="description-text">Cria painéis com botões onde membros clicam para obter/remover cargos.</p>
+          <form id="formReactionRole">
+            <div class="form-group"><label>Canal do Painel</label><select id="rrChannelSelect" class="form-control"><option value="">Selecionar canal...</option></select></div>
+            <div class="form-row"><div class="form-group half"><label>Título</label><input type="text" id="rrTitle" class="form-control" value="🎭 Seleciona os teus Cargos"></div><div class="form-group half"><label>Cor</label><div class="color-picker-wrapper"><input type="color" id="rrColorPicker" value="#5865F2"><input type="text" id="rrColor" class="form-control" value="#5865F2"></div></div></div>
+            <div class="form-group"><label>Descrição</label><textarea id="rrDescription" class="form-control" rows="2" placeholder="Clica nos botões para receber cargos!"></textarea></div>
+            <h4>Cargos (adiciona até 25):</h4>
+            <div id="rrRolesList" class="rr-roles-container"></div>
+            <button type="button" class="btn btn-outline" id="btnAddRrRole" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Cargo</button>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-paper-plane"></i> Criar Painel de Cargos</button></div>
+          </form>
+          <hr class="divider">
+          <h4>Painéis Existentes</h4>
+          <div id="rrExistingList"><div class="empty-state"><p>Nenhum painel criado.</p></div></div>
+        </div></div>
+      </section>
+
+      <!-- TAB: LEVELS / XP -->
+      <section id="tab-levels" class="tab-content">
+        <div class="split-layout">
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-ranking-star"></i> Sistema de Níveis</h3><label class="toggle-switch"><input type="checkbox" id="levelsEnabled"><span class="slider"></span></label></div><div class="card-body">
+            <form id="formLevels">
+              <div class="form-row"><div class="form-group half"><label>XP Mínimo por Mensagem</label><input type="number" id="levelsMinXp" class="form-control" value="15" min="1"></div><div class="form-group half"><label>XP Máximo por Mensagem</label><input type="number" id="levelsMaxXp" class="form-control" value="25" min="1"></div></div>
+              <div class="form-row"><div class="form-group half"><label>Cooldown (segundos)</label><input type="number" id="levelsXpCooldown" class="form-control" value="60" min="10"></div><div class="form-group half"><label>Canal de Anúncios de Level-Up</label><select id="levelsAnnounceChannel" class="form-control"><option value="">Canal da mensagem</option></select></div></div>
+              <h4>Recompensas Automáticas</h4>
+              <div id="levelRolesList" class="rr-roles-container"></div>
+              <button type="button" class="btn btn-outline" id="btnAddLevelRole" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Recompensa</button>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar</button></div>
+            </form>
+          </div></div>
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-trophy"></i> Leaderboard</h3></div><div class="card-body"><div id="leaderboardList"><div class="empty-state"><p>Ainda sem dados de XP.</p></div></div></div></div>
+        </div>
+      </section>
+
+      <!-- TAB: EMBEDS CUSTOMIZADOS -->
+      <section id="tab-embeds" class="tab-content">
+        <div class="split-layout">
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-envelope-open-text"></i> Enviar Embed</h3></div><div class="card-body">
+            <form id="formSendEmbed">
+              <div class="form-group"><label>Canal</label><select id="embedChannelSelect" class="form-control"><option value="">Selecionar canal...</option></select></div>
+              <div class="form-group"><label>Título</label><input type="text" id="embedTitle" class="form-control" placeholder="Título do Embed"></div>
+              <div class="form-group"><label>Descrição</label><textarea id="embedDescription" class="form-control" rows="4" placeholder="Conteúdo do embed..."></textarea></div>
+              <div class="form-row"><div class="form-group half"><label>Cor</label><div class="color-picker-wrapper"><input type="color" id="embedColorPicker" value="#5865F2"><input type="text" id="embedColor" class="form-control" value="#5865F2"></div></div><div class="form-group half"><label>Rodapé (footer)</label><input type="text" id="embedFooter" class="form-control" placeholder="Texto do rodapé"></div></div>
+              <div class="form-group"><label>URL da Imagem</label><input type="text" id="embedImage" class="form-control" placeholder="https://..."></div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-paper-plane"></i> Enviar Embed</button></div>
+            </form>
+          </div></div>
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-clock"></i> Mensagens Agendadas</h3></div><div class="card-body">
+            <form id="formScheduleMsg">
+              <div class="form-group"><label>Canal</label><select id="scheduleChannelSelect" class="form-control"><option value="">Selecionar canal...</option></select></div>
+              <div class="form-group"><label>Conteúdo da Mensagem</label><textarea id="scheduleContent" class="form-control" rows="3" placeholder="Mensagem a enviar..."></textarea></div>
+              <div class="form-group"><label>Expressão Cron</label><input type="text" id="scheduleCron" class="form-control" placeholder="0 9 * * * (todos os dias às 9:00)"><small class="form-help">Formato: minuto hora dia-mês mês dia-semana. Exemplos: <code>0 9 * * *</code> (diário 9h), <code>0 */6 * * *</code> (6 em 6h)</small></div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-clock"></i> Agendar</button></div>
+            </form>
+            <hr class="divider">
+            <div id="scheduledList"><div class="empty-state"><p>Sem mensagens agendadas.</p></div></div>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- TAB: GIVEAWAYS -->
+      <section id="tab-giveaways" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-gift"></i> Sorteios (Giveaways)</h3></div><div class="card-body">
+          <p class="description-text">Usa <code>/giveaway start</code> no Discord para criar sorteios. Os membros clicam num botão para participar e os vencedores são anunciados automaticamente.</p>
+          <div class="info-alert"><i class="fa-solid fa-circle-info"></i><div><strong>Comandos disponíveis:</strong><ul><li><code>/giveaway start</code> — Inicia um novo sorteio</li><li><code>/giveaway end</code> — Termina um sorteio antecipadamente</li><li><code>/giveaway reroll</code> — Sorteia novos vencedores</li></ul></div></div>
+          <h4>Sorteios Recentes</h4>
+          <div id="giveawaysList"><div class="empty-state"><i class="fa-solid fa-gift"></i><p>Sem sorteios registados.</p></div></div>
+        </div></div>
+      </section>
+
+      <!-- TAB: ESTATÍSTICAS -->
+      <section id="tab-stats" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-chart-line"></i> Estatísticas do Servidor</h3></div><div class="card-body">
+          <div class="stats-charts-grid">
+            <div class="chart-card"><h4>💬 Mensagens por Hora (últimos 7 dias)</h4><canvas id="chartHourly" height="200"></canvas></div>
+            <div class="chart-card"><h4>📈 Mensagens por Dia (últimos 30 dias)</h4><canvas id="chartDaily" height="200"></canvas></div>
+            <div class="chart-card"><h4>📊 Canais Mais Ativos</h4><canvas id="chartTopChannels" height="200"></canvas></div>
+            <div class="chart-card"><h4>👥 Evolução de Membros</h4><canvas id="chartMembers" height="200"></canvas></div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- TAB: DEFINIÇÕES -->
+      <section id="tab-settings" class="tab-content">
+        <div class="split-layout">
+          <div class="content-card"><div class="card-header"><h3><i class="fa-brands fa-discord"></i> Token do Bot</h3></div><div class="card-body">
+            <form id="formBotToken">
+              <div class="form-group"><label>Bot Token</label><input type="password" id="botTokenInput" class="form-control" placeholder="Cola o token do teu bot aqui"></div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-key"></i> Guardar Token</button></div>
+            </form>
+          </div></div>
+
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-gamepad"></i> Status do Bot</h3></div><div class="card-body">
+            <form id="formPresence">
+              <div class="form-row">
+                <div class="form-group half">
+                  <label>Estado</label>
+                  <select id="presenceStatus" class="form-control">
+                    <option value="online">Online</option>
+                    <option value="idle">Ausente (Idle)</option>
+                    <option value="dnd">Não Incomodar (DND)</option>
+                    <option value="invisible">Invisível</option>
+                  </select>
+                </div>
+                <div class="form-group half">
+                  <label>Tipo de Atividade</label>
+                  <select id="presenceType" class="form-control">
+                    <option value="Playing">A Jogar</option>
+                    <option value="Listening">A Ouvir</option>
+                    <option value="Watching">A Assistir</option>
+                    <option value="Competing">A Competir</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Texto da Atividade</label>
+                <input type="text" id="presenceText" class="form-control" placeholder="ex: no servidor!">
+              </div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Atualizar Status</button></div>
+            </form>
+          </div></div>
+
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-lock"></i> Acesso Web e Bot Owners</h3></div><div class="card-body">
+            <form id="formWebSettings">
+              <div class="form-group"><label>IDs dos Donos do Bot (um por linha)</label><textarea id="webBotOwners" class="form-control" rows="3" placeholder="123456789012345678"></textarea><small class="form-help">Utilizadores que podem executar comandos restritos do bot.</small></div>
+              <div class="form-group"><label>Nova Password do Painel Web</label><input type="password" id="webPassword" class="form-control" placeholder="Deixa em branco para não alterar"></div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Definições</button></div>
+            </form>
+          </div></div>
+
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-cloud-arrow-down"></i> Backup & Restauro</h3></div><div class="card-body">
+            <p class="description-text">Descarrega uma cópia completa das configurações e da base de dados, ou restaura a partir de um backup prévio.</p>
+            <div class="form-actions" style="justify-content: flex-start; gap: 10px; margin-bottom: 20px;">
+              <button type="button" class="btn btn-primary" id="btnDownloadBackup"><i class="fa-solid fa-download"></i> Descarregar Backup</button>
+              <label class="btn btn-outline" style="margin: 0; cursor: pointer;">
+                <i class="fa-solid fa-upload"></i> Restaurar Backup
+                <input type="file" id="fileRestoreBackup" accept=".json" style="display: none;">
+              </label>
+            </div>
+            <hr class="divider">
+            <h4>Backup Automático Diário</h4>
+            <form id="formAutoBackup">
+              <div class="form-row">
+                <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="backupAutoEnabled"><span>Ativar Backup Diário</span></label></div>
+                <div class="form-group half"><label>Canal para Envio</label><select id="backupChannelSelect" class="form-control"><option value="">Selecionar canal...</option></select></div>
+              </div>
+              <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Definições de Backup</button></div>
+            </form>
+          </div></div>
+          
+          <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-terminal"></i> Comandos do Bot</h3></div><div class="card-body">
+            <p class="description-text">Os "Slash Commands" (ex: /ban, /giveaway) devem ser registados na API do Discord para aparecerem no chat. Clica no botão abaixo para forçar o registo global destes comandos.</p>
+            <div class="form-actions" style="justify-content: flex-start;">
+              <button type="button" class="btn btn-outline" id="btnRegisterCommands"><i class="fa-solid fa-arrows-rotate"></i> Registar Comandos Slash</button>
+            </div>
+          </div></div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

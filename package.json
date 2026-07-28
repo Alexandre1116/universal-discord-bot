@@ -1,0 +1,36 @@
+{
+  "name": "random-shit-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord Bot com Web UI, Mensagens de Boas-Vindas/Saída e Canais de Voz Dinâmicos Clonados",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "web-ui",
+    "join-to-create",
+    "temp-voice"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "body-parser": "^1.20.3",
+    "canvas": "^3.2.3",
+    "cors": "^2.8.5",
+    "discord.js": "^14.18.0",
+    "distube": "^5.2.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "ffmpeg-static": "^5.3.0",
+    "libsodium-wrappers": "^0.8.4",
+    "ms": "^2.1.3",
+    "node-cron": "^3.0.3",
+    "rss-parser": "^3.13.0",
+    "sql.js": "^1.12.0"
+  }
+}
