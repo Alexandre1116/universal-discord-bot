@@ -1,0 +1,7 @@
+{
+  "name": "moderation",
+  "displayName": "Moderação",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Comandos essenciais de moderação: Ban, Kick, Mute, Avisos."
+}

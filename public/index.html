@@ -153,33 +153,27 @@
         </div></div>
       </section>
 
-      <!-- TAB: MÓDULOS -->
-      <section id="tab-modules" class="tab-content">
-        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Módulos (Ligar/Desligar Funcionalidades)</h3></div><div class="card-body">
-          <p class="description-text">Ativa ou desativa as várias funcionalidades do bot.</p>
-          <form id="formModules">
-            <div class="form-row">
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modModeration"><span>Moderação</span></label></div>
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modUtility"><span>Utilidade</span></label></div>
+      <!-- TAB: PLUGINS -->
+      <section id="tab-plugins" class="tab-content">
+        <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Plugins (Gestão e Instalação)</h3></div><div class="card-body">
+          <p class="description-text">Ativa, desativa ou instala novos plugins da comunidade através de um repositório GitHub.</p>
+          
+          <form id="formInstallPlugin" class="mb-4">
+            <div class="form-group">
+              <label>Instalar novo plugin (URL do GitHub):</label>
+              <div style="display: flex; gap: 10px;">
+                <input type="text" id="pluginGithubUrl" class="form-control" placeholder="https://github.com/user/repo" style="flex: 1;" required>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-download"></i> Instalar</button>
+              </div>
             </div>
-            <div class="form-row">
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modLevels"><span>Níveis / XP (Texto e Voz)</span></label></div>
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modReactionRoles"><span>Reaction Roles</span></label></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modGiveaway"><span>Sorteios (Giveaways)</span></label></div>
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modTickets"><span>Tickets</span></label></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modWelcome"><span>Boas-Vindas & Despedidas</span></label></div>
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modCustomCommands"><span>Auto-Respostas</span></label></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modMusic"><span>Música (DisTube)</span></label></div>
-              <div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="modNotifications"><span>Notificações (YouTube)</span></label></div>
-            </div>
-            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Módulos</button></div>
           </form>
+
+          <hr>
+          
+          <h4>Plugins Instalados</h4>
+          <div id="pluginsList" style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+            <!-- Renderizado dinamicamente -->
+          </div>
         </div></div>
       </section>
 

@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await fetchReactionRoles();
     await fetchLevelsConfig();
     await fetchCustomCommands();
-    await fetchModules();
+    await fetchPlugins();
     await fetchNotifications();
     await fetchWebSettings();
   }
@@ -454,41 +454,67 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(r.success ? 'Auto-respostas guardadas!' : r.error, !r.success);
   });
 
-  // MODULES
-  async function fetchModules() {
+  // PLUGINS
+  async function fetchPlugins() {
     try {
-      const r = await fetch('/api/modules'); const m = await r.json();
-      setVal('modModeration', m.moderation !== false, true);
-      setVal('modUtility', m.utility !== false, true);
-      setVal('modLevels', m.levels !== false, true);
-      setVal('modReactionRoles', m.reactionRoles !== false, true);
-      setVal('modGiveaway', m.giveaway !== false, true);
-      setVal('modTickets', m.tickets !== false, true);
-      setVal('modWelcome', m.welcome !== false, true);
-      setVal('modCustomCommands', m.customCommands !== false, true);
-      setVal('modMusic', m.music !== false, true);
-      setVal('modNotifications', m.notifications !== false, true);
+      const r = await fetch('/api/plugins'); 
+      const plugins = await r.json();
+      const list = document.getElementById('pluginsList');
+      if (!list) return;
+
+      if (plugins.length === 0) {
+        list.innerHTML = '<p>Nenhum plugin instalado.</p>';
+        return;
+      }
+
+      let html = '';
+      for (const p of plugins) {
+        html += `
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h5 style="margin: 0; color: #fff;">${p.displayName || p.name} <small style="color: #aaa;">v${p.version || '1.0'}</small></h5>
+            <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${p.description || 'Sem descrição.'}</p>
+            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${p.author || 'Desconhecido'} | ID: ${p.folderId}</p>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <label class="toggle-switch">
+              <input type="checkbox" onchange="togglePlugin('${p.folderId}', this.checked)" ${p.enabled ? 'checked' : ''}>
+              <span class="slider"></span>
+            </label>
+            <button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.folderId}')"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>`;
+      }
+      list.innerHTML = html;
     } catch (e) { console.error(e); }
   }
 
-  const formModules = document.getElementById('formModules');
-  if (formModules) {
-    formModules.addEventListener('submit', async e => {
+  window.togglePlugin = async (pluginId, enabled) => {
+    const r = await postJson('/api/plugins/toggle', { pluginId, enabled });
+    showToast(r.success ? 'Estado do plugin atualizado! (Requer reinício do bot para aplicar na totalidade)' : 'Erro', !r.success);
+  };
+
+  window.deletePlugin = async (pluginId) => {
+    if (!confirm('Tens a certeza que queres eliminar este plugin?')) return;
+    try {
+      const res = await fetch(`/api/plugins/${pluginId}`, { method: 'DELETE' });
+      const r = await res.json();
+      showToast(r.success ? 'Plugin eliminado com sucesso!' : r.error, !r.success);
+      fetchPlugins();
+    } catch (e) { console.error(e); }
+  };
+
+  const formInstallPlugin = document.getElementById('formInstallPlugin');
+  if (formInstallPlugin) {
+    formInstallPlugin.addEventListener('submit', async e => {
       e.preventDefault();
-      const modules = {
-        moderation: getChecked('modModeration'),
-        utility: getChecked('modUtility'),
-        levels: getChecked('modLevels'),
-        reactionRoles: getChecked('modReactionRoles'),
-        giveaway: getChecked('modGiveaway'),
-        tickets: getChecked('modTickets'),
-        welcome: getChecked('modWelcome'),
-        customCommands: getChecked('modCustomCommands'),
-        music: getChecked('modMusic'),
-        notifications: getChecked('modNotifications')
-      };
-      const r = await postJson('/api/modules', modules);
-      showToast(r.success ? 'Módulos guardados! O Bot aplicou as regras imediatamente.' : 'Erro ao guardar', !r.success);
+      const url = document.getElementById('pluginGithubUrl').value;
+      const r = await postJson('/api/plugins/install', { url });
+      showToast(r.success ? r.message : r.error, !r.success);
+      if (r.success) {
+        document.getElementById('pluginGithubUrl').value = '';
+        fetchPlugins();
+      }
     });
   }
 

@@ -1,6 +1,37 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const ms = require('ms');
-const { createGiveaway, getGiveawayByMessage, getGiveawayEntries, endGiveaway, enterGiveaway } = require('../../utils/database');
+const path = require('path');
+
+const databasePath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'database');
+const { createGiveaway, getGiveawayByMessage, getGiveawayEntries, endGiveaway, enterGiveaway } = require(databasePath);
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('giveaway')
+    .setDescription('Comandos de sorteios (Giveaways)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(sub => 
+      sub
+        .setName('start')
+        .setDescription('Inicia um novo sorteio')
+        .addStringOption(o => o.setName('premio').setDescription('O que vais sortear?').setRequired(true))
+        .addStringOption(o => o.setName('duração').setDescription('Ex: 1m, 1h, 1d, 7d').setRequired(true))
+        .addIntegerOption(o => o.setName('vencedores').setDescription('Número de vencedores (Padrão 1)'))
+        .addChannelOption(o => o.setName('canal').setDescription('Canal onde enviar o sorteio (Padrão é o atual)'))
+    )
+    .addSubcommand(sub => 
+      sub
+        .setName('end')
+        .setDescription('Termina um sorteio antecipadamente')
+        .addStringOption(o => o.setName('mensagem_id').setDescription('ID da mensagem do sorteio').setRequired(true))
+    )
+    .addSubcommand(sub => 
+      sub
+        .setName('reroll')
+        .setDescription('Sorteia um novo vencedor para um sorteio terminado')
+        .addStringOption(o => o.setName('mensagem_id').setDescription('ID da mensagem do sorteio').setRequired(true))
+    )
+];
 
 async function handleGiveawayStart(interaction) {
   const prize = interaction.options.getString('premio');
@@ -67,7 +98,6 @@ async function handleGiveawayReroll(interaction) {
   await interaction.reply({ content: `✅ Reroll realizado! Novo(s) vencedor(es): ${winnersText}`, ephemeral: true });
 }
 
-// Lógica para terminar um giveaway
 async function finishGiveaway(client, giveaway) {
   endGiveaway(giveaway.id);
 
@@ -112,7 +142,6 @@ function selectWinners(entries, count) {
   return shuffled.slice(0, Math.min(count, entries.length)).map(e => e.user_id);
 }
 
-// Handler para o botão de participação
 async function handleGiveawayButton(interaction) {
   const giveaway = getGiveawayByMessage(interaction.message.id);
 
@@ -128,7 +157,22 @@ async function handleGiveawayButton(interaction) {
   }
 }
 
+const events = {
+  interactionCreate: async (client, interaction) => {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'giveaway') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'start') await handleGiveawayStart(interaction);
+      if (sub === 'end') await handleGiveawayEnd(interaction);
+      if (sub === 'reroll') await handleGiveawayReroll(interaction);
+    } else if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
+      await handleGiveawayButton(interaction);
+    }
+  }
+};
+
 module.exports = {
-  handleGiveawayStart, handleGiveawayEnd, handleGiveawayReroll,
-  handleGiveawayButton, finishGiveaway
+  commands,
+  events,
+  // export for cron tasks if needed
+  finishGiveaway
 };

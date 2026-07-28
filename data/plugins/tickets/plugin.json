@@ -1,0 +1,7 @@
+{
+  "name": "tickets",
+  "displayName": "Sistema de Tickets",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Permite criar canais privados de suporte (tickets)."
+}

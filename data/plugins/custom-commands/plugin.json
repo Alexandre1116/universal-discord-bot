@@ -1,0 +1,7 @@
+{
+  "name": "customCommands",
+  "displayName": "Comandos Personalizados",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Permite definir comandos customizados que respondem a palavras-chave."
+}

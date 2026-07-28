@@ -1,7 +1,84 @@
-const { EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const ms = require('ms');
-const { addWarning, getWarnings, clearWarnings } = require('../../utils/database');
-const { getConfig } = require('../../utils/config');
+const path = require('path');
+
+// Caminho absoluto para a base de dados central
+const databasePath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'database');
+const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
+
+const { addWarning, getWarnings, clearWarnings } = require(databasePath);
+const { getConfig } = require(configPath);
+
+const spamTracker = new Map();
+const SPAM_WINDOW = 5000;
+const SPAM_THRESHOLD = 5;
+
+// Comandos
+const commands = [
+  new SlashCommandBuilder()
+    .setName('ban')
+    .setDescription('Bane um utilizador do servidor.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro a banir').setRequired(true))
+    .addStringOption(o => o.setName('razão').setDescription('Motivo do ban'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+
+  new SlashCommandBuilder()
+    .setName('kick')
+    .setDescription('Expulsa um utilizador do servidor.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro a expulsar').setRequired(true))
+    .addStringOption(o => o.setName('razão').setDescription('Motivo da expulsão'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+
+  new SlashCommandBuilder()
+    .setName('mute')
+    .setDescription('Silencia (timeout) um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro a silenciar').setRequired(true))
+    .addStringOption(o => o.setName('duração').setDescription('Duração (ex: 10m, 1h, 1d)').setRequired(true))
+    .addStringOption(o => o.setName('razão').setDescription('Motivo do silêncio'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName('unmute')
+    .setDescription('Remove o silêncio (timeout) de um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName('warn')
+    .setDescription('Dá um aviso a um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro a avisar').setRequired(true))
+    .addStringOption(o => o.setName('razão').setDescription('Motivo do aviso'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName('warnings')
+    .setDescription('Mostra os avisos de um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName('clearwarnings')
+    .setDescription('Limpa todos os avisos de um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+];
+
+// Funções de Handling
+async function sendAuditLog(guild, embed) {
+  try {
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.channelId) return;
+
+    const channel = guild.channels.cache.get(auditConfig.channelId) ||
+      await guild.channels.fetch(auditConfig.channelId).catch(() => null);
+    if (channel && channel.isTextBased()) {
+      await channel.send({ embeds: [embed] });
+    }
+  } catch (err) {
+    console.error('[AUDIT] Erro ao enviar log:', err.message);
+  }
+}
 
 async function handleBan(interaction) {
   const target = interaction.options.getMember('utilizador');
@@ -115,7 +192,6 @@ async function handleWarn(interaction) {
   await interaction.reply({ embeds: [embed] });
   await sendAuditLog(interaction.guild, embed);
 
-  // Auto-ação ao atingir o máximo de strikes
   if (totalWarnings.length >= maxStrikes) {
     try {
       if (strikeAction === 'mute' && target.moderatable) {
@@ -162,25 +238,101 @@ async function handleClearWarnings(interaction) {
   await interaction.reply({ content: `✅ Todos os avisos de **${target.tag}** foram limpos.` });
 }
 
-// Helper: enviar para o canal de audit log
-async function sendAuditLog(guild, embed) {
-  try {
-    const config = getConfig();
-    const auditConfig = config.auditLog || {};
-    if (!auditConfig.enabled || !auditConfig.channelId) return;
-
-    const channel = guild.channels.cache.get(auditConfig.channelId) ||
-      await guild.channels.fetch(auditConfig.channelId).catch(() => null);
-    if (channel && channel.isTextBased()) {
-      await channel.send({ embeds: [embed] });
+// Eventos
+const events = {
+  interactionCreate: async (client, interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    
+    switch (interaction.commandName) {
+      case 'ban': await handleBan(interaction); break;
+      case 'kick': await handleKick(interaction); break;
+      case 'mute': await handleMute(interaction); break;
+      case 'unmute': await handleUnmute(interaction); break;
+      case 'warn': await handleWarn(interaction); break;
+      case 'warnings': await handleWarnings(interaction); break;
+      case 'clearwarnings': await handleClearWarnings(interaction); break;
     }
-  } catch (err) {
-    console.error('[AUDIT] Erro ao enviar log:', err.message);
+  },
+  
+  messageCreate: async (client, message) => {
+    if (message.author.bot || !message.guild) return;
+    const config = getConfig();
+    const modConfig = config.moderation || {};
+    if (modConfig.enabled) {
+      await handleAutoMod(message, modConfig);
+    }
   }
+};
+
+async function handleAutoMod(message, modConfig) {
+  const content = message.content.toLowerCase();
+  const member = message.member;
+
+  if (member && member.permissions.has('ManageMessages')) return false;
+
+  if (modConfig.bannedWords && modConfig.bannedWords.length > 0) {
+    const banned = modConfig.bannedWords.some(word => content.includes(word.toLowerCase()));
+    if (banned) {
+      try {
+        await message.delete();
+        await message.channel.send({ content: `⚠️ ${message.author}, a tua mensagem continha palavras proibidas e foi removida.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+        return true;
+      } catch (err) {}
+    }
+  }
+
+  if (modConfig.antiLinks) {
+    const linkRegex = /(https?:\/\/[^\s]+)|(discord\.gg\/[^\s]+)/gi;
+    if (linkRegex.test(message.content)) {
+      const allowedChannels = modConfig.linkAllowedChannels || [];
+      if (!allowedChannels.includes(message.channel.id)) {
+        try {
+          await message.delete();
+          await message.channel.send({ content: `⚠️ ${message.author}, links não são permitidos neste canal.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+          return true;
+        } catch (err) {}
+      }
+    }
+  }
+
+  if (modConfig.antiSpam) {
+    const userId = message.author.id;
+    const now = Date.now();
+    if (!spamTracker.has(userId)) spamTracker.set(userId, []);
+    const timestamps = spamTracker.get(userId);
+    timestamps.push(now);
+    const recent = timestamps.filter(t => now - t < SPAM_WINDOW);
+    spamTracker.set(userId, recent);
+
+    if (recent.length >= SPAM_THRESHOLD) {
+      try {
+        await message.delete();
+        if (member && member.moderatable) {
+          await member.timeout(60 * 1000, 'Anti-spam');
+        }
+        await message.channel.send({ content: `⚠️ ${message.author}, foste temporariamente silenciado por spam.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+        spamTracker.delete(userId);
+        return true;
+      } catch (err) {}
+    }
+  }
+
+  if (modConfig.antiCaps && message.content.length > 10) {
+    const upperCount = (message.content.match(/[A-Z]/g) || []).length;
+    const ratio = upperCount / message.content.length;
+    if (ratio > 0.7) {
+      try {
+        await message.delete();
+        await message.channel.send({ content: `⚠️ ${message.author}, evita usar caps lock excessivo.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+        return true;
+      } catch (err) {}
+    }
+  }
+
+  return false;
 }
 
 module.exports = {
-  handleBan, handleKick, handleMute, handleUnmute,
-  handleWarn, handleWarnings, handleClearWarnings,
-  sendAuditLog
+  commands,
+  events
 };

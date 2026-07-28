@@ -1,0 +1,7 @@
+{
+  "name": "notifications",
+  "displayName": "Notificações (YouTube/Twitch)",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Envia alertas quando há vídeos novos."
+}

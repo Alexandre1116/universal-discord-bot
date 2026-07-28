@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { getConfig } = require('../utils/config');
-const { DisTube } = require('distube');
+
 
 const client = new Client({
   intents: [
@@ -13,30 +13,7 @@ const client = new Client({
   partials: [Partials.GuildMember, Partials.User, Partials.Channel]
 });
 
-// Inicializar o DisTube
-client.distube = new DisTube(client, {
-  emitNewSongOnly: true,
-  emitAddSongWhenCreatingQueue: false,
-  emitAddListWhenCreatingQueue: false,
-});
-
-// Eventos do DisTube básicos
-client.distube
-  .on('playSong', (queue, song) =>
-    queue.textChannel.send(`🎶 A tocar agora: \`${song.name}\` - \`${song.formattedDuration}\` (Adicionado por: ${song.user})`)
-  )
-  .on('addSong', (queue, song) =>
-    queue.textChannel.send(`✅ Adicionado à fila: \`${song.name}\` - \`${song.formattedDuration}\``)
-  )
-  .on('error', (channel, e) => {
-    if (channel) channel.send(`❌ Ocorreu um erro: ${e.toString().slice(0, 1974)}`);
-    else console.error('[DISTUBE ERRO]', e);
-  })
-  .on('empty', queue => queue.textChannel.send('A sala de voz está vazia. Saindo...'))
-  .on('searchNoResult', (message, query) =>
-    message.channel.send(`❌ Não encontrei resultados para: \`${query}\`!`)
-  )
-  .on('finish', queue => queue.textChannel.send('Fila terminada.'));
+// O Distube e outros plugins são agora inicializados dinamicamente pelo pluginManager
 
 let isBotReady = false;
 
@@ -91,14 +68,6 @@ client.once('ready', () => {
       }
     }
   });
-
-  // --- NOTIFICATIONS (YouTube/Twitch) ---
-  try {
-    const { initNotifier } = require('./services/notifier');
-    initNotifier(client);
-  } catch (err) {
-    console.error('[NOTIFIER] Erro ao iniciar notifier:', err.message);
-  }
 });
 
 function initBot() {

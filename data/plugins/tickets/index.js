@@ -1,6 +1,18 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const { createTicket, closeTicket, getUserOpenTicket, getOpenTickets } = require('../../utils/database');
-const { getConfig } = require('../../utils/config');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const path = require('path');
+const databasePath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'database');
+const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
+
+const { createTicket, closeTicket, getUserOpenTicket, getOpenTickets } = require(databasePath);
+const { getConfig } = require(configPath);
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('ticket-setup')
+    .setDescription('Cria a mensagem com botão para abrir tickets.')
+    .addChannelOption(o => o.setName('canal').setDescription('Canal para enviar o painel (Padrão é o atual)'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+];
 
 async function handleTicketSetup(interaction) {
   const channel = interaction.options.getChannel('canal') || interaction.channel;
@@ -26,7 +38,6 @@ async function handleTicketOpen(interaction) {
   const guild = interaction.guild;
   const user = interaction.user;
 
-  // Verificar se já tem ticket aberto
   const existing = getUserOpenTicket(guild.id, user.id);
   if (existing) {
     return interaction.reply({ content: `❌ Já tens um ticket aberto: <#${existing.channel_id}>`, ephemeral: true });
@@ -38,7 +49,6 @@ async function handleTicketOpen(interaction) {
   const ticketConfig = config.tickets || {};
   const supportRoleId = ticketConfig.supportRoleId || null;
 
-  // Permissões base
   const permissionOverwrites = [
     {
       id: guild.id,
@@ -54,7 +64,6 @@ async function handleTicketOpen(interaction) {
     }
   ];
 
-  // Se houver cargo de suporte, dar acesso
   if (supportRoleId) {
     permissionOverwrites.push({
       id: supportRoleId,
@@ -62,7 +71,6 @@ async function handleTicketOpen(interaction) {
     });
   }
 
-  // Criar canal de ticket
   const ticketChannel = await guild.channels.create({
     name: `ticket-${user.username}`,
     type: ChannelType.GuildText,
@@ -73,7 +81,6 @@ async function handleTicketOpen(interaction) {
 
   createTicket(guild.id, ticketChannel.id, user.id);
 
-  // Mensagem de boas-vindas do ticket
   const welcomeEmbed = new EmbedBuilder()
     .setTitle(`🎫 Ticket de ${user.tag}`)
     .setDescription(`Olá ${user}! A equipa de suporte irá responder em breve.\n\nDescreve o teu problema ou questão aqui.\n\nClica em **🔒 Fechar Ticket** quando estiver resolvido.`)
@@ -99,9 +106,7 @@ async function handleTicketOpen(interaction) {
 async function handleTicketClose(interaction) {
   const channel = interaction.channel;
 
-  // Gerar transcrição
   const transcript = await generateTranscript(channel);
-
   closeTicket(channel.id);
 
   const embed = new EmbedBuilder()
@@ -112,7 +117,6 @@ async function handleTicketClose(interaction) {
 
   await interaction.reply({ embeds: [embed] });
 
-  // Enviar transcrição para o canal de logs se configurado
   const config = getConfig();
   const ticketConfig = config.tickets || {};
   if (ticketConfig.logChannelId) {
@@ -127,7 +131,6 @@ async function handleTicketClose(interaction) {
     }
   }
 
-  // Apagar canal após 5 segundos
   setTimeout(async () => {
     try {
       await channel.delete('Ticket fechado');
@@ -167,4 +170,19 @@ async function generateTranscript(channel) {
   }
 }
 
-module.exports = { handleTicketSetup, handleTicketOpen, handleTicketClose, handleTicketTranscript };
+const events = {
+  interactionCreate: async (client, interaction) => {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'ticket-setup') {
+      await handleTicketSetup(interaction);
+    } else if (interaction.isButton()) {
+      if (interaction.customId === 'ticket_open') await handleTicketOpen(interaction);
+      if (interaction.customId === 'ticket_close') await handleTicketClose(interaction);
+      if (interaction.customId === 'ticket_transcript') await handleTicketTranscript(interaction);
+    }
+  }
+};
+
+module.exports = {
+  commands,
+  events
+};

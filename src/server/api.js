@@ -2,8 +2,54 @@ const express = require('express');
 const { EmbedBuilder } = require('discord.js');
 const { getConfig, updateConfig, saveConfig } = require('../utils/config');
 const { client, getBotStatus, initBot } = require('../bot/client');
+const fs = require('fs');
+const path = require('path');
+const { getInstalledPlugins, installPluginFromGithub, deletePlugin, PLUGINS_DIR } = require('../utils/pluginManager');
 
 const router = express.Router();
+
+// --- PLUGINS API ---
+router.get('/plugins', (req, res) => {
+  const plugins = getInstalledPlugins();
+  const config = getConfig();
+  const pluginsState = config.plugins || {};
+  
+  // Anexar estado atual (ativado/desativado)
+  const result = plugins.map(p => ({
+    ...p,
+    enabled: pluginsState[p.folderId] !== false
+  }));
+  res.json(result);
+});
+
+router.post('/plugins/install', (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, error: 'URL is required' });
+  
+  const result = installPluginFromGithub(url);
+  if (result.success) {
+    res.json({ success: true, message: 'Plugin instalado. O bot deve ser reiniciado para o carregar.' });
+  } else {
+    res.status(400).json(result);
+  }
+});
+
+router.post('/plugins/toggle', (req, res) => {
+  const { pluginId, enabled } = req.body;
+  const config = getConfig();
+  if (!config.plugins) config.plugins = {};
+  config.plugins[pluginId] = enabled;
+  updateConfig({ plugins: config.plugins });
+  res.json({ success: true });
+});
+
+router.delete('/plugins/:id', (req, res) => {
+  const result = deletePlugin(req.params.id);
+  res.json(result);
+});
+
+// Servir ficheiros estáticos da pasta ui/ dos plugins (tab.html, script.js)
+router.use('/plugins-ui', express.static(PLUGINS_DIR));
 
 // GET /api/status - Status do bot
 router.get('/status', (req, res) => {

@@ -1,0 +1,7 @@
+{
+  "name": "auditLog",
+  "displayName": "Registos de Auditoria",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Regista entradas, saídas e trocas de canais de voz num canal de texto."
+}

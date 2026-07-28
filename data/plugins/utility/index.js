@@ -1,4 +1,30 @@
-const { EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('serverinfo')
+    .setDescription('Mostra informações detalhadas sobre o servidor.'),
+
+  new SlashCommandBuilder()
+    .setName('userinfo')
+    .setDescription('Mostra informações sobre um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro (ou tu próprio se vazio)')),
+
+  new SlashCommandBuilder()
+    .setName('avatar')
+    .setDescription('Mostra o avatar de um utilizador.')
+    .addUserOption(o => o.setName('utilizador').setDescription('O membro (ou tu próprio se vazio)')),
+
+  new SlashCommandBuilder()
+    .setName('poll')
+    .setDescription('Cria uma votação rápida.')
+    .addStringOption(o => o.setName('pergunta').setDescription('A pergunta da votação').setRequired(true))
+    .addStringOption(o => o.setName('opcao1').setDescription('Primeira opção').setRequired(true))
+    .addStringOption(o => o.setName('opcao2').setDescription('Segunda opção').setRequired(true))
+    .addStringOption(o => o.setName('opcao3').setDescription('Terceira opção'))
+    .addStringOption(o => o.setName('opcao4').setDescription('Quarta opção'))
+    .addStringOption(o => o.setName('opcao5').setDescription('Quinta opção'))
+];
 
 async function handleServerInfo(interaction) {
   const guild = interaction.guild;
@@ -108,4 +134,20 @@ async function handlePoll(interaction) {
   }
 }
 
-module.exports = { handleServerInfo, handleUserInfo, handleAvatar, handlePoll };
+const events = {
+  interactionCreate: async (client, interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+
+    switch (interaction.commandName) {
+      case 'serverinfo': await handleServerInfo(interaction); break;
+      case 'userinfo': await handleUserInfo(interaction); break;
+      case 'avatar': await handleAvatar(interaction); break;
+      case 'poll': await handlePoll(interaction); break;
+    }
+  }
+};
+
+module.exports = {
+  commands,
+  events
+};

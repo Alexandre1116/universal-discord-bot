@@ -1,0 +1,7 @@
+{
+  "name": "music",
+  "displayName": "Música (DisTube)",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "description": "Comandos de música, filas e controlo de áudio via YouTube/Spotify/Soundcloud usando DisTube."
+}
