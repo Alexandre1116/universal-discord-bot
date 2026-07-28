@@ -5,6 +5,9 @@ module.exports = function registerGuildMemberRemove(client) {
   client.on('guildMemberRemove', async (member) => {
     try {
       const config = getConfig();
+      const modules = config.modules || {};
+      if (modules.welcome === false) return;
+
       const leaveConfig = config.leaveMessage;
 
       if (!leaveConfig || !leaveConfig.enabled || !leaveConfig.channelId) {

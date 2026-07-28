@@ -1,8 +1,41 @@
 const { ChannelType, EmbedBuilder } = require('discord.js');
 const { getConfig, updateConfig } = require('../../utils/config');
+const { addXp } = require('../../utils/database');
 
 // Guardar IDs de canais temporários ativos em memória
 const activeTempChannels = new Set();
+// Tracker para tempo de voz
+const voiceTracker = new Map();
+
+async function handleVoiceXpReward(client, member, joinTime, guildId) {
+  if (!joinTime) return;
+  const config = getConfig();
+  const modules = config.modules || {};
+  if (modules.levels === false) return; // Módulo desativado
+  const levelsConfig = config.levels || {};
+  if (!levelsConfig.enabled) return;
+
+  const diffMs = Date.now() - joinTime;
+  const minutes = Math.floor(diffMs / 60000);
+  
+  if (minutes > 0) {
+    // Ex: 5 XP por minuto
+    const xpPerMin = levelsConfig.voiceXpPerMin || 5;
+    const totalXp = minutes * xpPerMin;
+    const result = addXp(guildId, member.id, totalXp);
+
+    if (result.leveledUp) {
+      const announceChannel = levelsConfig.announceChannelId
+        ? (client.channels.cache.get(levelsConfig.announceChannelId))
+        : null;
+      if (announceChannel) {
+        try {
+          await announceChannel.send({ content: `🎉 Parabéns ${member}! Subiste para o **Nível ${result.level}** (Ganho via Canal de Voz)! 🌟` });
+        } catch (e) {}
+      }
+    }
+  }
+}
 
 module.exports = function registerVoiceStateUpdate(client) {
   // Inicialização e limpeza ao ligar
@@ -108,6 +141,23 @@ module.exports = function registerVoiceStateUpdate(client) {
           }
         }
       }
+
+      // --- 2.5 VOICE XP TRACKER ---
+      const memberId = newState.id;
+      // Condições de mute ou ausência de canal: parar de contar XP
+      if (!newState.channelId || newState.mute || newState.deaf || newState.selfMute || newState.selfDeaf) {
+        if (voiceTracker.has(memberId)) {
+          const joinTime = voiceTracker.get(memberId);
+          voiceTracker.delete(memberId);
+          await handleVoiceXpReward(client, newState.member, joinTime, newState.guild.id);
+        }
+      } else {
+        // Entrou num canal e não está mutado
+        if (!voiceTracker.has(memberId) && newState.channelId) {
+          voiceTracker.set(memberId, Date.now());
+        }
+      }
+
       // 3. AUDIT LOG DE VOZ
       const auditConfig = config.auditLog || {};
       if (auditConfig.enabled && auditConfig.channelId && auditConfig.voiceJoinLeave) {

@@ -5,8 +5,10 @@ module.exports = function registerGuildMemberAdd(client) {
   client.on('guildMemberAdd', async (member) => {
     try {
       const config = getConfig();
-      const joinConfig = config.joinMessage;
+      const modules = config.modules || {};
+      if (modules.welcome === false) return;
 
+      const joinConfig = config.joinMessage || {};
       if (!joinConfig || !joinConfig.enabled || !joinConfig.channelId) {
         return;
       }

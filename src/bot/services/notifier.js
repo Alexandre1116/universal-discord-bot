@@ -25,6 +25,9 @@ function initNotifier(client) {
   // Check every 10 minutes
   cron.schedule('*/10 * * * *', async () => {
     const config = getConfig();
+    const modules = config.modules || {};
+    if (modules.notifications === false) return;
+
     if (!config.notifications || !config.notifications.youtube || config.notifications.youtube.length === 0) return;
 
     for (const notif of config.notifications.youtube) {
