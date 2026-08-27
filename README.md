@@ -42,3 +42,9 @@ docker run -p 3000:3000 -d universal-discord-bot
 
 ---
 > 💡 Queres criar o teu próprio plugin para o bot? Lê a documentação: [Como Criar um Plugin Não Oficial](CREATING_PLUGINS.md)
+
+## ☕ Apoiar o Projeto
+
+Se este bot te for útil, considera apoiar o desenvolvimento oferecendo um café! O teu apoio ajuda a manter o projeto gratuito e em constante evolução.
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/alexandre1116)
