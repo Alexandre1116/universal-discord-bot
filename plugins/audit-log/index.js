@@ -1,5 +1,5 @@
 const { EmbedBuilder, AuditLogEvent } = require('discord.js');
-const { getConfig } = require('../../utils/config');
+const { getConfig } = require('../../src/utils/config');
 
 function init(client) {
   console.log('[AUDIT LOG] Plugin inicializado.');

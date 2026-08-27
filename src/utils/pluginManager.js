@@ -3,30 +3,55 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { getConfig, updateConfig } = require('./config');
 
-const PLUGINS_DIR = path.join(__dirname, '..', '..', 'data', 'plugins');
+// Plugins oficiais (dentro da imagem/repo) e plugins do utilizador (persistentes em data/)
+const OFFICIAL_PLUGINS_DIR = path.join(__dirname, '..', '..', 'plugins');
+const USER_PLUGINS_DIR = path.join(__dirname, '..', '..', 'data', 'plugins');
 
-// Garantir que a pasta plugins existe
-if (!fs.existsSync(PLUGINS_DIR)) {
-  fs.mkdirSync(PLUGINS_DIR, { recursive: true });
+// Garantir que a pasta de plugins do utilizador existe
+if (!fs.existsSync(USER_PLUGINS_DIR)) {
+  fs.mkdirSync(USER_PLUGINS_DIR, { recursive: true });
 }
 
-function getInstalledPlugins() {
-  const plugins = [];
-  const folders = fs.readdirSync(PLUGINS_DIR, { withFileTypes: true });
+function scanPluginsDir(dir, isOfficial) {
+  const found = [];
+  if (!fs.existsSync(dir)) return found;
+  const folders = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const folder of folders) {
     if (folder.isDirectory()) {
-      const pluginPath = path.join(PLUGINS_DIR, folder.name);
+      const pluginPath = path.join(dir, folder.name);
       const metaPath = path.join(pluginPath, 'plugin.json');
       if (fs.existsSync(metaPath)) {
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
           meta.folderId = folder.name;
-          plugins.push(meta);
+          meta.isOfficial = isOfficial;
+          found.push(meta);
         } catch (e) {
           console.error(`[PLUGIN MANAGER] Erro ao ler plugin.json do plugin ${folder.name}:`, e.message);
         }
       }
+    }
+  }
+  return found;
+}
+
+function getPluginPath(folderId) {
+  const userPath = path.join(USER_PLUGINS_DIR, folderId);
+  if (fs.existsSync(path.join(userPath, 'plugin.json'))) return userPath;
+  const officialPath = path.join(OFFICIAL_PLUGINS_DIR, folderId);
+  if (fs.existsSync(path.join(officialPath, 'plugin.json'))) return officialPath;
+  return null;
+}
+
+function getInstalledPlugins() {
+  // Plugins do utilizador têm precedência sobre oficiais com o mesmo folderId
+  const plugins = scanPluginsDir(USER_PLUGINS_DIR, false);
+  const seen = new Set(plugins.map(p => p.folderId));
+  for (const official of scanPluginsDir(OFFICIAL_PLUGINS_DIR, true)) {
+    if (!seen.has(official.folderId)) {
+      plugins.push(official);
+      seen.add(official.folderId);
     }
   }
   return plugins;
@@ -44,7 +69,7 @@ function installPluginFromGithub(url) {
     let repoName = parts[parts.length - 1];
     if (repoName.endsWith('.git')) repoName = repoName.slice(0, -4);
 
-    const pluginPath = path.join(PLUGINS_DIR, repoName);
+    const pluginPath = path.join(USER_PLUGINS_DIR, repoName);
 
     // 3. Clonar repositório
     if (fs.existsSync(pluginPath)) {
@@ -111,12 +136,15 @@ function installPluginFromGithub(url) {
 
 function deletePlugin(pluginId) {
   try {
-    const pluginPath = path.join(PLUGINS_DIR, pluginId);
-    if (fs.existsSync(pluginPath)) {
-      fs.rmSync(pluginPath, { recursive: true, force: true });
-      return { success: true };
+    const pluginPath = getPluginPath(pluginId);
+    if (!pluginPath) {
+      return { success: false, error: 'Plugin não encontrado' };
     }
-    return { success: false, error: 'Plugin não encontrado' };
+    if (fs.existsSync(path.join(OFFICIAL_PLUGINS_DIR, pluginId, 'plugin.json'))) {
+      return { success: false, error: 'Plugins oficiais não podem ser removidos.' };
+    }
+    fs.rmSync(pluginPath, { recursive: true, force: true });
+    return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -143,7 +171,12 @@ function loadPlugins(client, app) {
     }
 
     try {
-      const pluginPath = path.join(PLUGINS_DIR, plugin.folderId, 'index.js');
+      const pluginBasePath = getPluginPath(plugin.folderId);
+      if (!pluginBasePath) {
+        console.error(`[PLUGIN MANAGER] Caminho do plugin '${plugin.folderId}' não encontrado.`);
+        continue;
+      }
+      const pluginPath = path.join(pluginBasePath, 'index.js');
       if (fs.existsSync(pluginPath)) {
         const logic = require(pluginPath);
         
@@ -194,5 +227,7 @@ module.exports = {
   loadPlugins,
   isPluginLoaded,
   clearLoadedPlugins,
-  PLUGINS_DIR
+  getPluginPath,
+  OFFICIAL_PLUGINS_DIR,
+  USER_PLUGINS_DIR
 };

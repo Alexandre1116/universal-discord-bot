@@ -4,7 +4,7 @@ const { getConfig, updateConfig, saveConfig } = require('../utils/config');
 const { client, getBotStatus, initBot } = require('../bot/client');
 const fs = require('fs');
 const path = require('path');
-const { getInstalledPlugins, installPluginFromGithub, deletePlugin, PLUGINS_DIR } = require('../utils/pluginManager');
+const { getInstalledPlugins, installPluginFromGithub, deletePlugin, USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR } = require('../utils/pluginManager');
 
 const router = express.Router();
 
@@ -49,7 +49,7 @@ router.delete('/plugins/:id', (req, res) => {
 });
 
 // Servir ficheiros estáticos da pasta ui/ dos plugins (tab.html, script.js)
-router.use('/plugins-ui', express.static(PLUGINS_DIR));
+router.use('/plugins-ui', express.static(USER_PLUGINS_DIR), express.static(OFFICIAL_PLUGINS_DIR));
 
 // GET /api/status - Status do bot
 router.get('/status', (req, res) => {

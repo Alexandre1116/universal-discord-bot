@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const { getConfig } = require('../../utils/config');
-const { createTicket, closeTicket, getUserOpenTicket } = require('../../utils/database');
+const { getConfig } = require('../../src/utils/config');
+const { createTicket, closeTicket, getUserOpenTicket } = require('../../src/utils/database');
 
 function init(client) {
   console.log('[TICKETS] Plugin inicializado.');

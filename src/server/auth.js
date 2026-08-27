@@ -16,7 +16,7 @@ function authMiddleware(req, res, next) {
   return res.status(401).json({ success: false, error: 'Não autenticado.' });
 }
 
-function setupAuthRoutes(app) {
+function setupAuthRoutes(app, loginLimiter) {
   // GET /api/auth/status
   app.get('/api/auth/status', (req, res) => {
     res.json({
@@ -26,7 +26,7 @@ function setupAuthRoutes(app) {
   });
 
   // POST /api/auth/login
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', loginLimiter || ((req, res, next) => next()), (req, res) => {
     const { username, password } = req.body;
     const config = getConfig();
     

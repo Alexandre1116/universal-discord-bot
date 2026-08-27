@@ -1,0 +1,7 @@
+{
+  "name": "autoMod",
+  "displayName": "Auto-Moderção",
+  "version": "1.0.0",
+  "author": "Universal Discord Bot",
+  "description": "Filtro automático de spam, links, palavras banidas e uso excessivo de maiúsculas."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "voiceHubs",
+  "displayName": "Voice Hubs (J2C)",
+  "version": "1.0.0",
+  "author": "Universal Discord Bot",
+  "description": "Cria canais de voz temporários quando um utilizador entra num canal Hub (Join-to-Create)."
+}

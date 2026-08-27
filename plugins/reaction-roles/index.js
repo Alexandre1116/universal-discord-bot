@@ -1,4 +1,4 @@
-const { getConfig } = require('../../utils/config');
+const { getConfig } = require('../../src/utils/config');
 
 function init(client) {
   console.log('[REACTION ROLES] Plugin inicializado.');

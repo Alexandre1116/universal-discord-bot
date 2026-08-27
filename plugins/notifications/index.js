@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const RSSParser = require('rss-parser');
-const { getConfig } = require('../../utils/config');
+const { getConfig } = require('../../src/utils/config');
 
 const rss = new RSSParser({ timeout: 10000 });
 const seenVideos = new Map();

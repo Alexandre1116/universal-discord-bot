@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { getConfig } = require('../../utils/config');
+const { getConfig } = require('../../src/utils/config');
 
 function init(client) {
   console.log('[CUSTOM COMMANDS] Plugin inicializado.');

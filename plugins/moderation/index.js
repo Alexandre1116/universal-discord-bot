@@ -3,8 +3,8 @@ const ms = require('ms');
 const path = require('path');
 
 // Caminho absoluto para a base de dados central
-const databasePath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'database');
-const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
+const databasePath = path.join(__dirname, '..', '..', 'src', 'utils', 'database');
+const configPath = path.join(__dirname, '..', '..', 'src', 'utils', 'config');
 
 const { addWarning, getWarnings, clearWarnings } = require(databasePath);
 const { getConfig } = require(configPath);

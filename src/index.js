@@ -37,6 +37,13 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
+// Rate limiting específico para login (prevenir brute-force)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, error: 'Demasiadas tentativas de login. Tenta novamente mais tarde.' }
+});
+
 app.use(bodyParser.json());
 // Garantir session secret persistente
 const sessionSecret = process.env.SESSION_SECRET || (() => {
@@ -59,7 +66,7 @@ app.use(session({
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Auth routes (antes do middleware)
-setupAuthRoutes(app);
+setupAuthRoutes(app, loginLimiter);
 
 // Auth middleware para proteger API (se OAuth ativo)
 app.use('/api', authMiddleware);

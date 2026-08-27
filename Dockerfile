@@ -1,9 +1,10 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Set working directory
 WORKDIR /app
 
 # Instalar dependências necessárias para compilação nativa (canvas) e ferramentas de vídeo/áudio
+# git é necessário para instalar plugins via GitHub a partir da Web UI
 RUN apk add --no-cache \
     build-base \
     g++ \
@@ -11,13 +12,15 @@ RUN apk add --no-cache \
     jpeg-dev \
     pango-dev \
     giflib-dev \
-    ffmpeg
+    ffmpeg \
+    git \
+    openssh-client
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (reproducible build)
+RUN npm ci
 
 # Copy source code
 COPY . .
