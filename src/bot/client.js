@@ -90,7 +90,6 @@ function getBotStatus() {
     isReady: isBotReady,
     user: client.user ? {
       username: client.user.username,
-      discriminator: client.user.discriminator,
       tag: client.user.tag,
       avatar: client.user.displayAvatarURL(),
       id: client.user.id

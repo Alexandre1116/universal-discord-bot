@@ -398,13 +398,16 @@ router.get('/backup', (req, res) => {
 router.post('/restore', (req, res) => {
   const fs = require('fs');
   const path = require('path');
+  const { shutdownDb } = require('../utils/database');
   const DATA_DIR = path.join(__dirname, '../../data');
   const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
   const DB_PATH = path.join(DATA_DIR, 'data.db');
 
   try {
     const { config, database } = req.body;
-    
+
+    shutdownDb();
+
     if (config) {
       fs.writeFileSync(CONFIG_PATH, config, 'utf8');
     }
@@ -412,15 +415,14 @@ router.post('/restore', (req, res) => {
       const dbBuffer = Buffer.from(database, 'base64');
       fs.writeFileSync(DB_PATH, dbBuffer);
     }
-    
+
     res.json({ success: true, message: 'Restauro concluído! A reiniciar o sistema...' });
-    
-    // Agendar reinício
+
     setTimeout(() => {
       console.log('[SYSTEM] A reiniciar por pedido de restauro...');
       process.exit(0);
     }, 2000);
-    
+
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

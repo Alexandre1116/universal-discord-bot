@@ -18,6 +18,7 @@ if (fs.existsSync(OLD_DB_PATH) && !fs.existsSync(DB_PATH)) {
 
 let db = null;
 let initPromise = null;
+let shuttingDown = false;
 
 async function getDb() {
   if (db) return db;
@@ -38,14 +39,22 @@ async function getDb() {
 }
 
 function saveDb() {
-  if (!db) return;
+  if (!db || shuttingDown) return;
   const data = db.export();
   const buffer = Buffer.from(data);
   fs.writeFileSync(DB_PATH, buffer);
 }
 
-// Auto-save a cada 30 segundos
-setInterval(() => { saveDb(); }, 30000);
+function shutdownDb() {
+  shuttingDown = true;
+}
+
+// Auto-save a cada 30 segundos (apenas após o DB estar carregado)
+setInterval(() => { if (db) saveDb(); }, 30000);
+
+// Gravar DB ao fechar gracefully
+process.on('SIGINT', () => { saveDb(); process.exit(0); });
+process.on('SIGTERM', () => { saveDb(); process.exit(0); });
 
 function initTables() {
   if (!db) return;
@@ -333,7 +342,7 @@ function getMemberHistory(guildId, days = 30) {
 }
 
 module.exports = {
-  getDb, saveDb, initTables,
+  getDb, saveDb, shutdownDb, initTables,
   addWarning, getWarnings, clearWarnings, getAllWarnings,
   addXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
   createTicket, closeTicket, getOpenTickets, getUserOpenTicket,

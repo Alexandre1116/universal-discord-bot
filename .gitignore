@@ -4,8 +4,8 @@ node_modules/
 # Environment
 .env
 
-# Database
-data.db
+# Data directory (contains config.json with tokens, data.db, plugins)
+data/
 
 # OS
 Thumbs.db

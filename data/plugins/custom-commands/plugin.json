@@ -2,6 +2,6 @@
   "name": "customCommands",
   "displayName": "Comandos Personalizados",
   "version": "1.0.0",
-  "author": "Antigravity",
-  "description": "Permite definir comandos customizados que respondem a palavras-chave."
+  "author": "Universal Discord Bot",
+  "description": "Cria comandos de prefixo personalizados (ex: !regras) com respostas de texto ou embed."
 }

@@ -1,47 +1,38 @@
-const path = require('path');
-const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
-const { getConfig } = require(configPath);
+const { getConfig } = require('../../utils/config');
+
+function init(client) {
+  console.log('[REACTION ROLES] Plugin inicializado.');
+}
 
 const events = {
   interactionCreate: async (client, interaction) => {
     if (!interaction.isButton()) return;
-    
-    // Reaction Roles via botões
-    if (interaction.customId.startsWith('rr_')) {
-      await handleReactionRoleButton(interaction);
+
+    if (!interaction.customId.startsWith('rr_')) return;
+
+    const roleId = interaction.customId.slice(3);
+    const member = interaction.member;
+
+    if (!member || !roleId) return;
+
+    try {
+      const role = interaction.guild.roles.cache.get(roleId);
+      if (!role) {
+        return interaction.reply({ content: 'Cargo não encontrado.', ephemeral: true });
+      }
+
+      if (member.roles.cache.has(roleId)) {
+        await member.roles.remove(role);
+        await interaction.reply({ content: `❌ Removeste o cargo <@&${roleId}>.`, ephemeral: true });
+      } else {
+        await member.roles.add(role);
+        await interaction.reply({ content: `✅ Recebeste o cargo <@&${roleId}>.`, ephemeral: true });
+      }
+    } catch (err) {
+      console.error('[REACTION ROLES] Erro ao processar botão:', err.message);
+      await interaction.reply({ content: 'Erro ao processar o pedido. Verifica as permissões do bot.', ephemeral: true });
     }
   }
 };
 
-async function handleReactionRoleButton(interaction) {
-  const config = getConfig();
-  const reactionRoles = config.reactionRoles || [];
-
-  const roleId = interaction.customId.replace('rr_', '');
-  const member = interaction.member;
-
-  const rrConfig = reactionRoles.find(rr =>
-    rr.roles && rr.roles.some(r => r.roleId === roleId)
-  );
-
-  if (!rrConfig) {
-    return interaction.reply({ content: '❌ Configuração de Reaction Role não encontrada.', ephemeral: true });
-  }
-
-  try {
-    if (member.roles.cache.has(roleId)) {
-      await member.roles.remove(roleId);
-      await interaction.reply({ content: `✅ Cargo <@&${roleId}> **removido**!`, ephemeral: true });
-    } else {
-      await member.roles.add(roleId);
-      await interaction.reply({ content: `✅ Cargo <@&${roleId}> **adicionado**!`, ephemeral: true });
-    }
-  } catch (err) {
-    console.error('[RR] Erro ao alterar cargo:', err);
-    await interaction.reply({ content: '❌ Não tenho permissão para gerir este cargo. Certifica-te de que o meu cargo está acima do cargo alvo na hierarquia.', ephemeral: true });
-  }
-}
-
-module.exports = {
-  events
-};
+module.exports = { init, events };

@@ -1,32 +1,44 @@
-const path = require('path');
-const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
-const { getConfig } = require(configPath);
+const { EmbedBuilder } = require('discord.js');
+const { getConfig } = require('../../utils/config');
+
+function init(client) {
+  console.log('[CUSTOM COMMANDS] Plugin inicializado.');
+}
 
 const events = {
   messageCreate: async (client, message) => {
     if (message.author.bot || !message.guild) return;
 
     const config = getConfig();
+    const modules = config.modules || {};
+    if (modules.customCommands === false) return;
+
     const customCommands = config.customCommands || [];
-    const messageContent = message.content.trim();
+    if (customCommands.length === 0) return;
+
+    const prefix = '!';
 
     for (const cmd of customCommands) {
-      if (
-        (cmd.matchType === 'exact' && messageContent.toLowerCase() === cmd.trigger.toLowerCase()) ||
-        (cmd.matchType === 'startsWith' && messageContent.toLowerCase().startsWith(cmd.trigger.toLowerCase())) ||
-        (!cmd.matchType && messageContent.toLowerCase() === cmd.trigger.toLowerCase())
-      ) {
+      const trigger = `${prefix}${cmd.trigger}`;
+      if (message.content.trim().toLowerCase() === trigger.toLowerCase()) {
         try {
-          await message.channel.send({ content: cmd.response });
-          return;
-        } catch (e) {
-          console.error('[CUSTOM COMMANDS] Erro ao enviar resposta:', e.message);
+          if (cmd.type === 'embed') {
+            const embed = new EmbedBuilder()
+              .setColor(cmd.color || '#5865F2')
+              .setDescription(cmd.response)
+              .setTimestamp();
+            if (cmd.title) embed.setTitle(cmd.title);
+            await message.channel.send({ embeds: [embed] });
+          } else {
+            await message.channel.send(cmd.response);
+          }
+        } catch (err) {
+          console.error('[CUSTOM COMMANDS] Erro ao executar comando personalizado:', err.message);
         }
+        break;
       }
     }
   }
 };
 
-module.exports = {
-  events
-};
+module.exports = { init, events };

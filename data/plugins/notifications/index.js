@@ -1,66 +1,85 @@
-const Parser = require('rss-parser');
-const cron = require('node-cron');
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
-const { getConfig } = require(configPath);
+const { EmbedBuilder } = require('discord.js');
+const RSSParser = require('rss-parser');
+const { getConfig } = require('../../utils/config');
 
-const parser = new Parser();
-const DATA_DIR = path.join(__dirname, '..', '..', '..', 'data');
-const NOTIFIED_VIDEOS_FILE = path.join(DATA_DIR, 'notified_videos.json');
-
-let notifiedVideos = [];
-if (fs.existsSync(NOTIFIED_VIDEOS_FILE)) {
-  try {
-    notifiedVideos = JSON.parse(fs.readFileSync(NOTIFIED_VIDEOS_FILE, 'utf8'));
-  } catch (err) {
-    notifiedVideos = [];
-  }
-}
-
-function saveNotifiedVideos() {
-  fs.writeFileSync(NOTIFIED_VIDEOS_FILE, JSON.stringify(notifiedVideos, null, 2));
-}
-
-let cronTask = null;
+const rss = new RSSParser({ timeout: 10000 });
+const seenVideos = new Map();
+const POLL_INTERVAL = 5 * 60 * 1000;
 
 function init(client) {
-  if (cronTask) {
-    cronTask.stop();
-  }
-  
-  cronTask = cron.schedule('*/10 * * * *', async () => {
-    const config = getConfig();
-    if (!config.notifications || !config.notifications.youtube || config.notifications.youtube.length === 0) return;
+  console.log('[NOTIFICATIONS] Plugin inicializado.');
 
-    for (const notif of config.notifications.youtube) {
-      if (!notif.channelId || !notif.youtubeId) continue;
-      try {
-        const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${notif.youtubeId}`;
-        const feed = await parser.parseURL(feedUrl);
-        if (feed.items && feed.items.length > 0) {
-          const latestVideo = feed.items[0];
-          
-          if (!notifiedVideos.includes(latestVideo.id)) {
-            const discordChannel = await client.channels.fetch(notif.channelId).catch(() => null);
-            if (discordChannel && discordChannel.isTextBased()) {
-              const message = notif.message 
-                ? notif.message.replace('{url}', latestVideo.link).replace('{title}', latestVideo.title).replace('{author}', feed.title)
-                : `🎥 **${feed.title}** acabou de publicar um novo vídeo: **${latestVideo.title}**!\n${latestVideo.link}`;
-                
-              await discordChannel.send({ content: message });
-              notifiedVideos.push(latestVideo.id);
-              saveNotifiedVideos();
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`[NOTIFICATIONS] Erro ao verificar YouTube (${notif.youtubeId}):`, err.message);
-      }
-    }
-  });
+  startPolling(client);
+  setInterval(() => startPolling(client), POLL_INTERVAL);
 }
 
-module.exports = {
-  init
-};
+async function startPolling(client) {
+  const config = getConfig();
+  const notifications = config.notifications || {};
+  const ytList = notifications.youtube || [];
+
+  for (const yt of ytList) {
+    if (!yt.channelId || !yt.discordChannelId) continue;
+
+    try {
+      const feed = await rss.parseURL(`https://www.youtube.com/feeds/videos.xml?channel_id=${yt.channelId}`);
+
+      const seen = seenVideos.get(yt.channelId) || [];
+      for (const item of (feed.items || []).slice(0, 3)) {
+        if (seen.includes(item.id)) continue;
+
+        seen.push(item.id);
+        seenVideos.set(yt.channelId, seen.slice(-50));
+
+        if (seen.length > 1) {
+          const channel = client.channels.cache.get(yt.discordChannelId);
+          if (channel) {
+            const embed = new EmbedBuilder()
+              .setColor('#FF0000')
+              .setTitle('🔴 Novo vídeo no YouTube!')
+              .setDescription(`**${item.title}**\n[Ver vídeo](${item.link})`)
+              .setThumbnail(item.media?.thumbnail?.url || null)
+              .setTimestamp();
+            await channel.send({ content: yt.roleToPing ? `<@&${yt.roleToPing}>` : '', embeds: [embed] }).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[NOTIFICATIONS] Erro ao verificar canal YT ${yt.channelId}:`, err.message);
+    }
+  }
+
+  const twitchList = notifications.twitch || [];
+  for (const tw of twitchList) {
+    if (!tw.username || !tw.discordChannelId) continue;
+
+    try {
+      const res = await fetch(`https://decapi.me/twitch/uptime/${tw.username}`);
+      const text = await res.text();
+
+      const isLive = !text.toLowerCase().includes('offline') && !text.toLowerCase().includes('error');
+
+      const seenKey = `twitch_${tw.username}`;
+      const wasLive = seenVideos.get(seenKey) || false;
+
+      if (isLive && !wasLive) {
+        seenVideos.set(seenKey, true);
+        const channel = client.channels.cache.get(tw.discordChannelId);
+        if (channel) {
+          const embed = new EmbedBuilder()
+            .setColor('#9146FF')
+            .setTitle('🟣 Twitch Live!')
+            .setDescription(`**${tw.username}** está em direto!\n[Ver stream](https://twitch.tv/${tw.username})`)
+            .setTimestamp();
+          await channel.send({ content: tw.roleToPing ? `<@&${tw.roleToPing}>` : '', embeds: [embed] }).catch(() => {});
+        }
+      } else if (!isLive) {
+        seenVideos.set(seenKey, false);
+      }
+    } catch (err) {
+      console.error(`[NOTIFICATIONS] Erro ao verificar Twitch ${tw.username}:`, err.message);
+    }
+  }
+}
+
+module.exports = { init };

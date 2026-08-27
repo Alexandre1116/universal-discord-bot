@@ -1,145 +1,155 @@
-const { EmbedBuilder } = require('discord.js');
-const path = require('path');
-const configPath = path.join(__dirname, '..', '..', '..', 'src', 'utils', 'config');
-const { getConfig } = require(configPath);
+const { EmbedBuilder, AuditLogEvent } = require('discord.js');
+const { getConfig } = require('../../utils/config');
+
+function init(client) {
+  console.log('[AUDIT LOG] Plugin inicializado.');
+}
+
+async function getLogChannel(guild) {
+  const config = getConfig();
+  const auditConfig = config.auditLog || {};
+  if (!auditConfig.enabled || !auditConfig.channelId) return null;
+  return guild.channels.cache.get(auditConfig.channelId) || await guild.channels.fetch(auditConfig.channelId).catch(() => null);
+}
 
 const events = {
-  voiceStateUpdate: async (client, oldState, newState) => {
-    try {
-      const config = getConfig();
-      const auditConfig = config.auditLog || {};
-      if (!auditConfig.enabled || !auditConfig.channelId || !auditConfig.voiceJoinLeave) return;
-
-      const auditChannel = newState.guild.channels.cache.get(auditConfig.channelId);
-      if (!auditChannel || !auditChannel.isTextBased()) return;
-
-      const member = newState.member || oldState.member;
-      if (!member || member.user.bot) return;
-
-      if (newState.channelId && !oldState.channelId) {
-        const embed = new EmbedBuilder()
-          .setTitle('🔊 Membro Entrou em Canal de Voz')
-          .setColor('#57F287')
-          .addFields(
-            { name: '👤 Membro', value: `${member.user.tag}`, inline: true },
-            { name: '🔊 Canal', value: `<#${newState.channelId}>`, inline: true }
-          )
-          .setTimestamp();
-        await auditChannel.send({ embeds: [embed] }).catch(() => {});
-      } else if (oldState.channelId && !newState.channelId) {
-        const embed = new EmbedBuilder()
-          .setTitle('🔇 Membro Saiu de Canal de Voz')
-          .setColor('#ED4245')
-          .addFields(
-            { name: '👤 Membro', value: `${member.user.tag}`, inline: true },
-            { name: '🔊 Canal', value: `<#${oldState.channelId}>`, inline: true }
-          )
-          .setTimestamp();
-        await auditChannel.send({ embeds: [embed] }).catch(() => {});
-      } else if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
-        const embed = new EmbedBuilder()
-          .setTitle('🔀 Membro Mudou de Canal de Voz')
-          .setColor('#5865F2')
-          .addFields(
-            { name: '👤 Membro', value: `${member.user.tag}`, inline: true },
-            { name: '⬅️ De', value: `<#${oldState.channelId}>`, inline: true },
-            { name: '➡️ Para', value: `<#${newState.channelId}>`, inline: true }
-          )
-          .setTimestamp();
-        await auditChannel.send({ embeds: [embed] }).catch(() => {});
-      }
-    } catch (error) {
-      console.error('[AUDIT LOG] Erro no evento voiceStateUpdate:', error);
-    }
-  },
-
-  guildBanAdd: async (client, ban) => {
-    try {
-      const config = getConfig();
-      const auditConfig = config.auditLog || {};
-      if (!auditConfig.enabled || !auditConfig.channelId || !auditConfig.bans) return;
-
-      const channel = ban.guild.channels.cache.get(auditConfig.channelId);
-      if (!channel || !channel.isTextBased()) return;
-
-      const embed = new EmbedBuilder()
-        .setTitle('🔨 Utilizador Banido')
-        .setColor('#ED4245')
-        .addFields(
-          { name: '👤 Utilizador', value: `${ban.user.tag} (${ban.user.id})`, inline: true },
-          { name: '📝 Razão', value: ban.reason || 'Sem razão especificada', inline: true }
-        )
-        .setThumbnail(ban.user.displayAvatarURL({ dynamic: true }))
-        .setTimestamp();
-
-      await channel.send({ embeds: [embed] }).catch(() => {});
-    } catch (err) {
-      console.error('[AUDIT LOG] Erro guildBanAdd:', err.message);
-    }
-  },
-
   messageDelete: async (client, message) => {
-    try {
-      if (!message.guild || message.author?.bot) return;
+    if (message.author?.bot) return;
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.messageDelete) return;
 
-      const config = getConfig();
-      const auditConfig = config.auditLog || {};
-      if (!auditConfig.enabled || !auditConfig.channelId || !auditConfig.messageDelete) return;
+    const channel = await getLogChannel(message.guild);
+    if (!channel) return;
 
-      const channel = message.guild.channels.cache.get(auditConfig.channelId);
-      if (!channel || !channel.isTextBased()) return;
+    const embed = new EmbedBuilder()
+      .setColor('#ED4245')
+      .setTitle('🗑️ Mensagem Apagada')
+      .addFields(
+        { name: 'Autor', value: `<@${message.author.id}> (${message.author.tag})`, inline: true },
+        { name: 'Canal', value: `<#${message.channel.id}>`, inline: true }
+      )
+      .setDescription(message.content ? `**Conteúdo:** ${message.content.slice(0, 1024)}` : '*Sem conteúdo (possivelmente embed/imagem)*')
+      .setTimestamp();
 
-      const embed = new EmbedBuilder()
-        .setTitle('🗑️ Mensagem Apagada')
-        .setColor('#ED4245')
-        .addFields(
-          { name: '👤 Autor', value: message.author ? `${message.author.tag} (${message.author.id})` : 'Desconhecido', inline: true },
-          { name: '💬 Canal', value: `<#${message.channelId}>`, inline: true },
-          { name: '📝 Conteúdo', value: message.content ? message.content.substring(0, 1024) : '*[Sem conteúdo de texto / Embed]*' }
-        )
-        .setTimestamp();
-
-      if (message.attachments.size > 0) {
-        embed.addFields({ name: '📎 Anexos', value: message.attachments.map(a => a.url).join('\n').substring(0, 1024) });
-      }
-
-      await channel.send({ embeds: [embed] }).catch(() => {});
-    } catch (err) {
-      console.error('[AUDIT LOG] Erro messageDelete:', err.message);
-    }
+    await channel.send({ embeds: [embed] }).catch(() => {});
   },
 
   messageUpdate: async (client, oldMessage, newMessage) => {
+    if (oldMessage.author?.bot) return;
+    if (oldMessage.content === newMessage.content) return;
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.messageEdit) return;
+
+    const channel = await getLogChannel(oldMessage.guild);
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+      .setColor('#FEE75C')
+      .setTitle('✏️ Mensagem Editada')
+      .addFields(
+        { name: 'Autor', value: `<@${oldMessage.author.id}>`, inline: true },
+        { name: 'Canal', value: `<#${oldMessage.channel.id}>`, inline: true },
+        { name: 'Antes', value: oldMessage.content?.slice(0, 1024) || '*Vazio*' },
+        { name: 'Depois', value: newMessage.content?.slice(0, 1024) || '*Vazio*' }
+      )
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] }).catch(() => {});
+  },
+
+  guildBanAdd: async (client, ban) => {
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.bans) return;
+
+    const channel = await getLogChannel(ban.guild);
+    if (!channel) return;
+
+    let moderator = 'Desconhecido';
     try {
-      if (!newMessage.guild || newMessage.author?.bot) return;
-      if (oldMessage.content === newMessage.content) return;
+      const logs = await ban.guild.fetchAuditLogs({ type: AuditLogEvent.MemberBanAdd, limit: 1 });
+      const entry = logs.entries.first();
+      if (entry) moderator = `<@${entry.executor.id}>`;
+    } catch {}
 
-      const config = getConfig();
-      const auditConfig = config.auditLog || {};
-      if (!auditConfig.enabled || !auditConfig.channelId || !auditConfig.messageEdit) return;
+    const embed = new EmbedBuilder()
+      .setColor('#ED4245')
+      .setTitle('🔨 Membro Banido')
+      .addFields(
+        { name: 'Membro', value: ban.user ? `<@${ban.user.id}> (${ban.user.tag})` : 'Desconhecido', inline: true },
+        { name: 'Moderador', value: moderator, inline: true },
+        { name: 'Razão', value: ban.reason || 'Sem razão especificada' }
+      )
+      .setTimestamp();
 
-      const channel = newMessage.guild.channels.cache.get(auditConfig.channelId);
-      if (!channel || !channel.isTextBased()) return;
+    await channel.send({ embeds: [embed] }).catch(() => {});
+  },
 
-      const embed = new EmbedBuilder()
-        .setTitle('✏️ Mensagem Editada')
-        .setColor('#FEE75C')
-        .addFields(
-          { name: '👤 Autor', value: newMessage.author ? `${newMessage.author.tag} (${newMessage.author.id})` : 'Desconhecido', inline: true },
-          { name: '💬 Canal', value: `<#${newMessage.channelId}>`, inline: true },
-          { name: '📝 Antes', value: (oldMessage.content || '*[Sem conteúdo]*').substring(0, 1024) },
-          { name: '📝 Depois', value: (newMessage.content || '*[Sem conteúdo]*').substring(0, 1024) },
-          { name: '🔗 Link', value: `[Ir para a mensagem](${newMessage.url})` }
-        )
-        .setTimestamp();
+  guildBanRemove: async (client, ban) => {
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.bans) return;
 
-      await channel.send({ embeds: [embed] }).catch(() => {});
-    } catch (err) {
-      console.error('[AUDIT LOG] Erro messageUpdate:', err.message);
+    const channel = await getLogChannel(ban.guild);
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+      .setColor('#57F287')
+      .setTitle('🔓 Membro Desbanido')
+      .addFields(
+        { name: 'Membro', value: ban.user ? `<@${ban.user.id}> (${ban.user.tag})` : 'Desconhecido', inline: true }
+      )
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] }).catch(() => {});
+  },
+
+  voiceStateUpdate: async (client, oldState, newState) => {
+    const config = getConfig();
+    const auditConfig = config.auditLog || {};
+    if (!auditConfig.enabled || !auditConfig.voiceJoinLeave) return;
+
+    const channel = await getLogChannel(newState.guild);
+    if (!channel) return;
+
+    const member = newState.member;
+    if (!member) return;
+
+    let action = null;
+    if (!oldState.channelId && newState.channelId) {
+      action = 'Entrou';
+    } else if (oldState.channelId && !newState.channelId) {
+      action = 'Saiu';
+    } else if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+      action = 'Mudou';
     }
+
+    if (!action) return;
+
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle('🔊 Atividade de Voz')
+      .addFields(
+        { name: 'Membro', value: `<@${member.id}>`, inline: true },
+        { name: 'Ação', value: action, inline: true }
+      );
+
+    if (action === 'Mudou') {
+      embed.addFields(
+        { name: 'De', value: `<#${oldState.channelId}>`, inline: true },
+        { name: 'Para', value: `<#${newState.channelId}>`, inline: true }
+      );
+    } else if (action === 'Entrou') {
+      embed.addFields({ name: 'Canal', value: `<#${newState.channelId}>`, inline: true });
+    } else {
+      embed.addFields({ name: 'Canal', value: `<#${oldState.channelId}>`, inline: true });
+    }
+
+    embed.setTimestamp();
+    await channel.send({ embeds: [embed] }).catch(() => {});
   }
 };
 
-module.exports = {
-  events
-};
+module.exports = { init, events };

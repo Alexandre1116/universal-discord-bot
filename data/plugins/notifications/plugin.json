@@ -1,7 +1,7 @@
 {
   "name": "notifications",
-  "displayName": "Notificações (YouTube/Twitch)",
+  "displayName": "Notificações YT/Twitch",
   "version": "1.0.0",
-  "author": "Antigravity",
-  "description": "Envia alertas quando há vídeos novos."
+  "author": "Universal Discord Bot",
+  "description": "Notifica automaticamente quando um canal do YouTube publica um vídeo ou uma stream na Twitch começa."
 }

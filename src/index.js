@@ -5,6 +5,8 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const session = require('express-session');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
 
 const registerGuildMemberAdd = require('./bot/events/guildMemberAdd');
@@ -15,18 +17,39 @@ const apiRoutes = require('./server/api');
 const apiExtendedRoutes = require('./server/apiExtended');
 const { authMiddleware, setupAuthRoutes } = require('./server/auth');
 const { getDb } = require('./utils/database');
-const { getConfig } = require('./utils/config');
+const { getConfig, updateConfig } = require('./utils/config');
 const { loadPlugins } = require('./utils/pluginManager');
+const { startScheduledMessages } = require('./bot/services/scheduledMessages');
 const { REST, Routes } = require('discord.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middlewares
+// Middlewares de segurança
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
+
+// Rate limiting para a API
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: { success: false, error: 'Muitos pedidos. Tenta novamente mais tarde.' }
+});
+app.use('/api/', apiLimiter);
+
 app.use(bodyParser.json());
+// Garantir session secret persistente
+const sessionSecret = process.env.SESSION_SECRET || (() => {
+  const config = getConfig();
+  if (config.sessionSecret) return config.sessionSecret;
+  const crypto = require('crypto');
+  const newSecret = crypto.randomBytes(32).toString('hex');
+  updateConfig({ sessionSecret: newSecret });
+  return newSecret;
+})();
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'discord-bot-super-secret-key-' + Date.now(),
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 horas
@@ -41,6 +64,11 @@ setupAuthRoutes(app);
 // Auth middleware para proteger API (se OAuth ativo)
 app.use('/api', authMiddleware);
 
+// Health check endpoint (antes das rotas protegidas)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: Date.now() });
+});
+
 // Rotas API Core
 app.use('/api', apiRoutes);
 app.use('/api', apiExtendedRoutes);
@@ -50,16 +78,34 @@ registerGuildMemberAdd(client);
 registerGuildMemberRemove(client);
 registerMessageCreate(client);
 
-// Carregar Plugins
-const pluginCommands = loadPlugins(client, app);
+// Inicializar base de dados de forma assíncrona
+getDb().catch(err => console.error('[DB] Erro ao inicializar base de dados:', err));
 
-// Rota genérica para servir a Web UI (SPA fallback)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
-
-// Quando o bot está pronto, registar slash commands
+// Carregar Plugins apenas quando o bot estiver pronto
+let pluginCommands = [];
 client.once('ready', async () => {
+  // Garantir que a base de dados está pronta antes de carregar plugins
+  try {
+    await getDb();
+  } catch (err) {
+    console.error('[DB] Erro ao inicializar base de dados:', err);
+  }
+
+  // Carregar plugins dentro do ready para garantir que client.user está disponível
+  try {
+    pluginCommands = loadPlugins(client, app);
+  } catch (err) {
+    console.error('[PLUGINS] Erro ao carregar plugins:', err);
+  }
+
+  // Iniciar agendador de mensagens programadas
+  try {
+    startScheduledMessages(client);
+  } catch (err) {
+    console.error('[SCHEDULER] Erro ao iniciar agendador de mensagens:', err);
+  }
+
+  // Registarr slash commands
   const clientId = process.env.CLIENT_ID || getConfig().clientId || client.user.id;
   const token = process.env.DISCORD_TOKEN || getConfig().token;
 
@@ -76,10 +122,14 @@ client.once('ready', async () => {
     } catch (error) {
       console.error('[COMMANDS] Erro ao registar slash commands:', error);
     }
+  } else {
+    console.warn('[COMMANDS] CLIENT_ID ou DISCORD_TOKEN ausentes — slash commands não registados.');
   }
+});
 
-  // Inicializar base de dados
-  await getDb();
+// Rota genérica para servir a Web UI (SPA fallback)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 // Iniciar Servidor Web

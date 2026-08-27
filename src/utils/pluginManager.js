@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { getConfig, updateConfig } = require('./config');
 
 const PLUGINS_DIR = path.join(__dirname, '..', '..', 'data', 'plugins');
@@ -52,7 +52,7 @@ function installPluginFromGithub(url) {
     }
 
     console.log(`[PLUGIN MANAGER] A clonar repositório: ${url}`);
-    execSync(`git clone ${url} "${pluginPath}"`, { stdio: 'inherit' });
+    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit' });
 
     // 4. Validar Licença Open-Source
     const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
@@ -86,7 +86,7 @@ function installPluginFromGithub(url) {
     const packagePath = path.join(pluginPath, 'package.json');
     if (fs.existsSync(packagePath)) {
       console.log(`[PLUGIN MANAGER] A instalar dependências para o plugin ${repoName}...`);
-      execSync('npm install', { cwd: pluginPath, stdio: 'inherit' });
+      execFileSync('npm', ['install'], { cwd: pluginPath, stdio: 'inherit' });
     }
 
     // 5. Validar se existe plugin.json
@@ -129,12 +129,19 @@ function getActivePlugins() {
   return getInstalledPlugins().filter(p => pluginsState[p.folderId] !== false);
 }
 
-// Carrega a lógica dos plugins
+// Carrega a lógica dos plugins (previne carregamento duplicado)
+const loadedPlugins = new Set();
+
 function loadPlugins(client, app) {
   const activePlugins = getActivePlugins();
   let allCommands = [];
 
   for (const plugin of activePlugins) {
+    if (loadedPlugins.has(plugin.folderId)) {
+      console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' já carregado, a saltar...`);
+      continue;
+    }
+
     try {
       const pluginPath = path.join(PLUGINS_DIR, plugin.folderId, 'index.js');
       if (fs.existsSync(pluginPath)) {
@@ -144,7 +151,12 @@ function loadPlugins(client, app) {
         
         if (logic.events) {
           for (const [eventName, handler] of Object.entries(logic.events)) {
-            client.on(eventName, (...args) => handler(client, ...args));
+            client.on(eventName, (...args) => {
+              const result = handler(client, ...args);
+              if (result && typeof result.catch === 'function') {
+                result.catch(err => console.error(`[PLUGIN MANAGER] Erro no evento '${eventName}' do plugin '${plugin.folderId}':`, err));
+              }
+            });
           }
         }
         
@@ -155,6 +167,8 @@ function loadPlugins(client, app) {
         if (logic.routes && app) {
           logic.routes(app);
         }
+        
+        loadedPlugins.add(plugin.folderId);
         console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' carregado.`);
       }
     } catch (e) {
@@ -164,11 +178,21 @@ function loadPlugins(client, app) {
   return allCommands;
 }
 
+function isPluginLoaded(folderId) {
+  return loadedPlugins.has(folderId);
+}
+
+function clearLoadedPlugins() {
+  loadedPlugins.clear();
+}
+
 module.exports = {
   getInstalledPlugins,
   installPluginFromGithub,
   getActivePlugins,
   deletePlugin,
   loadPlugins,
+  isPluginLoaded,
+  clearLoadedPlugins,
   PLUGINS_DIR
 };

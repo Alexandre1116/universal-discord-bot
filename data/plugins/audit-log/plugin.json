@@ -1,7 +1,7 @@
 {
   "name": "auditLog",
-  "displayName": "Registos de Auditoria",
+  "displayName": "Audit Log",
   "version": "1.0.0",
-  "author": "Antigravity",
-  "description": "Regista entradas, saídas e trocas de canais de voz num canal de texto."
+  "author": "Universal Discord Bot",
+  "description": "Regista eventos do servidor (mensagens apagadas, edições, bans, entrada/saída de voz) num canal de log."
 }

@@ -2,6 +2,6 @@
   "name": "music",
   "displayName": "Música (DisTube)",
   "version": "1.0.0",
-  "author": "Antigravity",
-  "description": "Comandos de música, filas e controlo de áudio via YouTube/Spotify/Soundcloud usando DisTube."
+  "author": "Universal Discord Bot",
+  "description": "Reproduz música de YouTube, Spotify e SoundCloud em canais de voz com comandos slash."
 }

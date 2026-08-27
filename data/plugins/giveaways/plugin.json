@@ -1,7 +1,7 @@
 {
   "name": "giveaways",
-  "displayName": "Sorteios (Giveaways)",
+  "displayName": "Giveaways (Sorteios)",
   "version": "1.0.0",
-  "author": "Antigravity",
-  "description": "Sistema de sorteios interativos com botões de participação."
+  "author": "Universal Discord Bot",
+  "description": "Cria sorteios com botões de participação e seleção automática de vencedores."
 }
