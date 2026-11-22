@@ -208,6 +208,7 @@
       <section id="tab-customcmds" class="tab-content">
         <div class="content-card"><div class="card-header"><h3><i class="fa-solid fa-message"></i> Comandos Personalizados / Auto-Respostas</h3></div><div class="card-body">
           <p class="description-text">O bot responde automaticamente sempre que alguém disser uma certa palavra ou comando.</p>
+          <p class="description-text"><strong>Como funciona:</strong> a mensagem precisa de começar por <code>!</code>. Em <em>Texto exato</em> e <em>Começa por</em>, escreve o gatilho sem o <code>!</code> (ex: <code>regras</code> responde a <code>!regras</code>). Em <em>Regex</em>, o padrão é aplicado à <strong>mensagem inteira, incluindo o <code>!</code></strong> — escreve <code>^!promo$</code>, não <code>^promo$</code>. Placeholders na resposta: <code>{user}</code>, <code>{username}</code>, <code>{server}</code>, <code>{channel}</code>, <code>{count}</code>.</p>
           <form id="formCustomCmds">
             <div id="customCmdsList" class="rr-roles-container"></div>
             <button type="button" class="btn btn-outline" id="btnAddCustomCmd" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Comando</button>

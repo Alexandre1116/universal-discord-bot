@@ -46,11 +46,14 @@ const loginLimiter = rateLimit({
 
 // O restauro envia a base de dados inteira em base64: o limite por omissão do
 // body-parser (100 KB) rebentava com 413 em backups perfeitamente normais (uma
-// BD com 90 dias de histórico de um servidor já passa os 100 KB). Montado antes
-// do parser global — o body-parser não volta a fazer parse (req._body).
-app.use('/api/restore', bodyParser.json({ limit: process.env.RESTORE_BODY_LIMIT || '50mb' }));
-
-app.use(bodyParser.json());
+// BD com 90 dias de histórico de um servidor já passa os 100 KB).
+// O parser grande é montado JÁ DEPOIS da autenticação (em baixo) — caso contrário
+// qualquer pessoa sem sessão fazia o processo ler e analisar dezenas de MB. Aqui
+// apenas deixamos esse pedido passar sem parser.
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path === '/api/restore') return next();
+  return bodyParser.json()(req, res, next);
+});
 // Garantir session secret persistente
 const sessionSecret = process.env.SESSION_SECRET || (() => {
   const config = getConfig();
@@ -77,6 +80,10 @@ setupAuthRoutes(app, loginLimiter);
 // Auth middleware para proteger API (se OAuth ativo)
 app.use('/api', authMiddleware);
 
+// A partir daqui a sessão já foi validada: só agora vale a pena ler um corpo
+// potencialmente grande (o restauro traz a BD em base64)
+app.post('/api/restore', bodyParser.json({ limit: process.env.RESTORE_BODY_LIMIT || '50mb' }));
+
 // Health check endpoint (antes das rotas protegidas)
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
@@ -94,6 +101,23 @@ app.use(pluginRouter);
 // Rotas de API desconhecidas devolvem JSON (em vez do HTML da SPA)
 app.use('/api', (req, res) => {
   res.status(404).json({ success: false, error: `Rota da API não encontrada: ${req.method} ${req.originalUrl}` });
+});
+
+// Erros de parsing/middleware em JSON: sem isto um body demasiado grande chegava
+// à Web UI como HTML e o browser mostrava "Unexpected token '<'"
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: `Pedido demasiado grande. Para restaurar backups maiores aumente RESTORE_BODY_LIMIT (atualmente ${process.env.RESTORE_BODY_LIMIT || '50mb'}).`
+    });
+  }
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ success: false, error: `JSON inválido no pedido: ${err.message}` });
+  }
+  console.error('[WEB] Erro não tratado:', err.message);
+  res.status(err.status || 500).json({ success: false, error: err.message || 'Erro interno.' });
 });
 
 // Registar Eventos do Bot Core

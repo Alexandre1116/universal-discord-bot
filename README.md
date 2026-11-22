@@ -40,6 +40,16 @@ docker run -p 3000:3000 -d universal-discord-bot
 
 *(No primeiro acesso serás reencaminhado para configurar o utilizador e a senha de administrador).*
 
+### Variáveis de ambiente (opcionais)
+
+| Variável | Efeito |
+|---|---|
+| `PORT` | Porta do painel web (por omissão `3000`). |
+| `DISCORD_TOKEN` | Token do bot, em vez de o guardar no painel (fica em `data/config.json`). |
+| `CLIENT_ID` | ID da aplicação, para registar slash commands sem depender do arranque. |
+| `SESSION_SECRET` | Segredo das sessões do painel; é gerado automaticamente na primeira execução. |
+| `RESTORE_BODY_LIMIT` | Limite do corpo do pedido de restauro (por omissão `50mb`). Um restauro envia a base de dados em base64, por isso backups com mais de ~37 MB de BD precisam de um valor maior. |
+
 ---
 > 💡 Queres criar o teu próprio plugin para o bot? Lê a documentação: [Como Criar um Plugin Não Oficial](CREATING_PLUGINS.md)
 

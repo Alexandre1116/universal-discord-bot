@@ -3,6 +3,8 @@ const { getConfig, updateConfig } = require('../../src/utils/config');
 
 // Espelho em memória de config.tempChannels (sobrevive a reinícios)
 const tempChannels = new Map();
+// Criações em curso (guild:membro) — evita dois canais para o mesmo membro
+const hubCreations = new Set();
 
 function indexFromConfig() {
   tempChannels.clear();
@@ -122,6 +124,14 @@ const events = {
     // canal: eventos de mute/deafen têm o mesmo channelId e criavam canais a mais.
     const hub = voiceHubs.find(h => h.channelId === newState.channelId);
     if (hub && oldState.channelId !== newState.channelId) {
+      // Serializar por servidor+membro: uma saída e reentrada rápidas produziam
+      // duas criações e dois pedidos de movimento para o mesmo membro
+      const lockKey = `${newState.guild.id}:${newState.id}`;
+      if (hubCreations.has(lockKey)) {
+        console.log('[VOICE HUBS] Criação já em curso para este membro; a ignorar o segundo pedido.');
+        return;
+      }
+      hubCreations.add(lockKey);
       try {
         const guild = newState.guild;
         const member = newState.member;
@@ -178,6 +188,8 @@ const events = {
         console.log(`[VOICE HUBS] Canal temporário criado: ${tempChannel.name}`);
       } catch (err) {
         console.error('[VOICE HUBS] Erro ao criar canal temporário:', err.message);
+      } finally {
+        hubCreations.delete(lockKey);
       }
       return;
     }

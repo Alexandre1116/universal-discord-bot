@@ -78,9 +78,13 @@ async function finishGiveaway(client, gw) {
     // falhar ou o processo cair, o resultado fica recuperável em BD.
     // Se a gravação falhar NÃO anunciamos: anunciar com ended=0 faria o sorteio
     // ser re-sortiado e re-anunciado a cada 15 segundos.
-    if (!endGiveaway(gw.id, winners)) {
+    const closed = endGiveaway(gw.id, winners);
+    if (!closed) {
       console.error(`[GIVEAWAYS] Falha ao gravar os vencedores do sorteio ${gw.id} (${winners.join(', ')}); nada anunciado, nova tentativa na próxima ronda.`);
       return;
+    }
+    if (closed.persisted === false) {
+      console.warn(`[GIVEAWAYS] Sorteio ${gw.id} encerrado em memória mas não gravado em disco (o autosave tenta de novo).`);
     }
 
     const channel = await client.channels.fetch(gw.channel_id).catch(() => null);

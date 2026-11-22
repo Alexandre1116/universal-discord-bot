@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getConfig } = require('../../src/utils/config');
 const { addXp, addVoiceXp, getUserXp, getLeaderboard, canGainXp, calculateLevel, xpForLevel } = require('../../src/utils/database');
 
-// Voice XP: Map<guildId, Map<userId, NodeJS.Timeout>>
+// Voice XP: Map<guildId, Map<userId, { timer, intervalSeconds }>>
 const voiceTimers = new Map();
 
 function init(client) {
@@ -134,6 +134,15 @@ function startVoiceTimer(client, guild, userId, levelsConfig) {
       const levels = getConfig().levels || {};
       if (!levels.enabled || levels.voiceXpEnabled === false) {
         stopVoiceTimer(guild.id, userId);
+        return;
+      }
+
+      // Se a cadência mudou na UI, recria o timer já no próximo tick em vez de
+      // esperar pela reconciliação (até 2 minutos)
+      const wantedInterval = Math.max(10, parseInt(levels.voiceXpInterval, 10) || 60);
+      if (wantedInterval !== intervalSeconds) {
+        stopVoiceTimer(guild.id, userId);
+        startVoiceTimer(client, guild, userId, levels);
         return;
       }
 

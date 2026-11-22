@@ -144,17 +144,20 @@ const events = {
           return;
         }
 
-        // 2) Só depois marca fechado na BD
-        if (!closeTicket(channelId)) {
+        // 2) Só depois marca fechado na BD. Sem registo aberto na BD (canal
+        // criado à mão) o UPDATE não altera linhas, e isso não é uma falha — só a
+        // equipa de suporte chega a esse caminho.
+        const persisted = closeTicket(channelId);
+        if (!persisted) {
           await interaction.editReply({
             content: '⚠️ A transcrição foi enviada, mas a base de dados não registou o fecho. O canal **não foi apagado** — volta a tentar.'
           });
           return;
         }
 
+        // 3) Agenda o apagamento JÁ: se a edição da resposta falhar, o fecho não
+        // fica pela metade nem a trava fica presa até ao reinício
         closingHeldByTimeout = true;
-        await interaction.editReply('🔒 A fechar este ticket em 5 segundos...');
-
         setTimeout(async () => {
           try {
             await interaction.channel.delete();
@@ -164,6 +167,12 @@ const events = {
             closing.delete(channelId);
           }
         }, 5000);
+
+        const diskWarning = persisted.persisted === false
+          ? '\n⚠️ Não consegui gravar a base de dados em disco — se o processo reiniciar, o ticket pode voltar a aparecer aberto.'
+          : '';
+        await interaction.editReply(`🔒 A fechar este ticket em 5 segundos...${diskWarning}`)
+          .catch(err => console.error('[TICKETS] Falha ao atualizar a resposta do fecho:', err.message));
       } catch (err) {
         console.error('[TICKETS] Erro ao fechar ticket:', err.message);
         if (interaction.replied || interaction.deferred) {
@@ -183,12 +192,18 @@ const events = {
       const existing = getUserOpenTicket(interaction.guild.id, interaction.user.id);
       if (existing) {
         // Se o canal foi apagado à mão, o registo ficava "open" para sempre e o
-        // utilizador nunca mais conseguia abrir um ticket
-        const existingChannel = await interaction.guild.channels.fetch(existing.channel_id).catch(() => null);
-        if (!existingChannel) {
+        // utilizador nunca mais conseguia abrir um ticket. Só fechamos quando o
+        // Discord confirma que o canal não existe (10003): um erro transitório ou
+        // de permissões não pode fechar um ticket real.
+        const existingChannel = await interaction.guild.channels.fetch(existing.channel_id)
+          .catch(err => (err && err.code === 10003 ? null : undefined));
+
+        if (existingChannel === null) {
           closeTicket(existing.channel_id);
-        } else {
+        } else if (existingChannel) {
           return interaction.reply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.', ephemeral: true });
+        } else {
+          return interaction.reply({ content: 'Não consegui confirmar o teu ticket aberto (erro temporário). Tenta outra vez.', ephemeral: true });
         }
       }
 
@@ -214,7 +229,16 @@ const events = {
           });
         }
 
-        createTicket(interaction.guild.id, ticketChannel.id, interaction.user.id);
+        const created = createTicket(interaction.guild.id, ticketChannel.id, interaction.user.id);
+        if (!created) {
+          // Sem registo, o canal ficava órfão (e /ticket-close não o tratava):
+          // desfazemos o canal em vez de deixar um ticket invisível
+          await ticketChannel.delete('Registo do ticket falhou.').catch(() => {});
+          return interaction.reply({
+            content: 'Não consegui registar o ticket na base de dados — o canal foi removido. Tenta outra vez.',
+            ephemeral: true
+          });
+        }
 
         const embed = new EmbedBuilder()
           .setColor('#5865F2')

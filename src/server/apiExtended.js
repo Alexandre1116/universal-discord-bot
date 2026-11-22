@@ -265,7 +265,13 @@ router.get('/scheduled-messages/:guildId', (req, res) => {
 
 // DELETE /api/scheduled-messages/:id
 router.delete('/scheduled-messages/:id', (req, res) => {
-  deleteScheduledMessage(parseInt(req.params.id));
+  const removed = deleteScheduledMessage(parseInt(req.params.id));
+  if (!removed) {
+    return res.status(500).json({ success: false, error: 'Falha ao remover o agendamento (erro na base de dados).' });
+  }
+  if (removed.changes === 0) {
+    return res.status(404).json({ success: false, error: 'Agendamento não encontrado.' });
+  }
   res.json({ success: true });
 });
 
@@ -396,12 +402,13 @@ router.get('/backup', (req, res) => {
 });
 
 // POST /api/restore
-router.post('/restore', (req, res) => {
+router.post('/restore', async (req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const { shutdownDb, abortShutdown, validateDbBuffer } = require('../utils/database');
+  const { getDb, shutdownDb, abortShutdown, validateDbBuffer } = require('../utils/database');
   const { saveConfig } = require('../utils/config');
   const DATA_DIR = path.join(__dirname, '../../data');
+  const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
   const DB_PATH = path.join(DATA_DIR, 'data.db');
 
   const badRequest = message => Object.assign(new Error(message), { status: 400 });
@@ -429,6 +436,9 @@ router.post('/restore', (req, res) => {
 
     let dbBuffer = null;
     if (database) {
+      // garante que o módulo sql.js está carregado antes de validar (senão um
+      // backup perfeitamente válido era rejeitado com "ainda não inicializada")
+      await getDb();
       dbBuffer = Buffer.from(String(database), 'base64');
       if (dbBuffer.length === 0) throw badRequest('Backup inválido: a base de dados está vazia.');
       if (dbBuffer.subarray(0, 15).toString('utf8') !== 'SQLite format 3') {
@@ -454,8 +464,10 @@ router.post('/restore', (req, res) => {
 
     // 3) Só agora escrevemos. Primeiro o ficheiro novo da BD para um temporário
     // (falhar aqui não altera nada); depois o config; por fim fechamos a BD e
-    // fazemos rename — assim não fica config novo com BD antiga/fechada.
+    // fazemos rename. Se algo falhar a meio, repomos o config anterior — sem isto
+    // um 500 deixava metade do restauro aplicado.
     const tmpDb = `${DB_PATH}.restore`;
+    const previousConfigRaw = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : null;
     if (dbBuffer) {
       try {
         fs.writeFileSync(tmpDb, dbBuffer);
@@ -465,19 +477,30 @@ router.post('/restore', (req, res) => {
     }
 
     let dbStopped = false;
+    let configApplied = false;
     try {
       if (parsedConfig && !saveConfig(parsedConfig)) {
         throw ioError('Falha ao gravar o config restaurado em disco.');
       }
+      if (parsedConfig) configApplied = true;
+
       if (dbBuffer) {
         shutdownDb();
         dbStopped = true;
         fs.renameSync(tmpDb, DB_PATH);
       }
     } catch (err) {
-      // Se já paramos as gravações, há que as reativar: sem isto o processo
-      // continuava vivo a aceitar operações sem gravar nada em disco
       if (dbStopped) abortShutdown();
+      if (configApplied && previousConfigRaw !== null) {
+        try {
+          const rollbackTmp = `${CONFIG_PATH}.rollback`;
+          fs.writeFileSync(rollbackTmp, previousConfigRaw, 'utf8');
+          fs.renameSync(rollbackTmp, CONFIG_PATH);
+          console.error('[RESTORE] Config reposto no estado anterior.');
+        } catch (rbErr) {
+          console.error('[RESTORE] Não foi possível repor o config anterior:', rbErr.message);
+        }
+      }
       throw err instanceof Error && err.status ? err : ioError(`Falha ao aplicar o restauro: ${err.message}`);
     } finally {
       if (dbBuffer && fs.existsSync(tmpDb)) {
@@ -487,10 +510,12 @@ router.post('/restore', (req, res) => {
 
     res.json({ success: true, message: 'Restauro concluído! A reiniciar o sistema...' });
 
+    // Janela mínima: as escritas ficam suspensas até o processo morrer, por isso
+    // cada segundo aqui é trabalho perdido (e o runSql já as recusa)
     setTimeout(() => {
       console.log('[SYSTEM] A reiniciar por pedido de restauro...');
       process.exit(0);
-    }, 2000);
+    }, 300);
 
   } catch (error) {
     const status = error && error.status ? error.status : 400;

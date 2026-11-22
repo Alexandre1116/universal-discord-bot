@@ -75,20 +75,28 @@ router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
     // própria pasta ui/ (ou a do plugin) apontar para fora das raízes autorizadas
     const realRoots = [USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR]
       .map(root => { try { return fs.realpathSync(root); } catch (err) { return path.resolve(root); } });
-    let realBase, realUiDir, realTarget;
+    const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
+    let realBase, realUiDir;
     try {
       realBase = fs.realpathSync(base);
       realUiDir = fs.realpathSync(uiDir);
-      realTarget = fs.realpathSync(target);
     } catch (err) {
       return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
     }
-    const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
     if (!realRoots.some(root => inside(realBase, root))) {
       return res.status(403).json({ success: false, error: 'Pasta do plugin fora das raízes autorizadas.' });
     }
-    if (!inside(realUiDir, realBase)) {
+    // a pasta ui/ tem de ser uma SUBPASTA real do plugin (igualdade aceitaria uma
+    // ui/ redirecionada para a própria pasta do plugin, expondo index.js etc.)
+    if (!inside(realUiDir, realBase) || realUiDir === realBase) {
       return res.status(403).json({ success: false, error: 'A pasta ui/ do plugin aponta para fora do plugin.' });
+    }
+    // só depois de garantir a contenção das pastas é que se resolve o alvo
+    let realTarget;
+    try {
+      realTarget = fs.realpathSync(target);
+    } catch (err) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
     }
     if (!inside(realTarget, realUiDir)) {
       return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });

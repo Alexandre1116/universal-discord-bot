@@ -40,6 +40,18 @@ async function getDb() {
   return initPromise;
 }
 
+// Esquema mínimo que o código espera encontrar. Nomes de tabelas não chegam:
+// uma BD com as tabelas certas mas colunas em falta passaria no integrity_check e
+// rebentava nas consultas do bot depois da troca. As colunas que o arranque sabe
+// migrar (winners) são toleradas em falta.
+const REQUIRED_SCHEMA = {
+  xp_levels: ['guild_id', 'user_id', 'xp', 'level'],
+  warnings: ['guild_id', 'user_id'],
+  giveaways: ['guild_id', 'channel_id', 'prize', 'ends_at'],
+  tickets: ['guild_id', 'channel_id', 'user_id', 'status'],
+  member_history: ['guild_id', 'member_count', 'recorded_at']
+};
+
 // Valida um binário de base de dados (ex: backup a restaurar) sem abrir mão da
 // ligação em memória. Devolve { ok, error }.
 function validateDbBuffer(buffer) {
@@ -50,10 +62,15 @@ function validateDbBuffer(buffer) {
     const check = probe.exec('PRAGMA integrity_check');
     const verdict = check[0] && check[0].values[0] ? String(check[0].values[0][0]) : 'desconhecido';
     if (verdict !== 'ok') return { ok: false, error: `Verificação de integridade falhou: ${verdict}` };
-    const tables = probe.exec("SELECT name FROM sqlite_master WHERE type='table'");
-    const names = new Set(tables[0] ? tables[0].values.map(v => v[0]) : []);
-    for (const required of ['xp_levels', 'giveaways', 'warnings']) {
-      if (!names.has(required)) return { ok: false, error: `Backup sem a tabela obrigatória "${required}".` };
+
+    for (const [table, columns] of Object.entries(REQUIRED_SCHEMA)) {
+      const info = probe.exec(`PRAGMA table_info(${table})`);
+      if (!info[0]) return { ok: false, error: `Backup sem a tabela obrigatória "${table}".` };
+      const present = new Set(info[0].values.map(v => v[1]));
+      const missing = columns.filter(c => !present.has(c));
+      if (missing.length) {
+        return { ok: false, error: `A tabela "${table}" do backup não tem as colunas: ${missing.join(', ')}.` };
+      }
     }
     return { ok: true };
   } catch (err) {
@@ -132,6 +149,7 @@ function initTables() {
     host_id TEXT NOT NULL,
     ends_at TEXT NOT NULL,
     ended INTEGER DEFAULT 0,
+    winners TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
 
@@ -216,17 +234,32 @@ function queryOne(sql, params = []) {
 
 function runSql(sql, params = []) {
   if (!db) return null;
+  // Durante um restauro as escritas são recusadas ANTES de alterarem a memória:
+  // caso contrário o processo parece responder sucesso e perde a operação
+  if (shuttingDown) {
+    console.error('[DB] Escritas suspensas (restauro em curso); operação recusada.');
+    return null;
+  }
+  let result;
   try {
     db.run(sql, params);
     // db.export() (dentro de saveDb) repõe o estado da ligação, por isso as
     // métricas têem de ser lidas ANTES de gravar em disco
-    const result = { changes: db.getRowsModified(), lastId: queryOne('SELECT last_insert_rowid() as id')?.id };
-    saveDb();
-    return result;
+    result = { changes: db.getRowsModified(), lastId: queryOne('SELECT last_insert_rowid() as id')?.id, persisted: true };
   } catch (e) {
     console.error('[DB] run error:', e.message);
     return null;
   }
+  try {
+    saveDb();
+  } catch (e) {
+    // A alteração ficou aplicada em memória (o autosave de 30s tenta de novo);
+    // o importante é não dizer que falhou quando não falhou, nem que persistiu
+    // quando não persistiu
+    console.error('[DB] alteração aplicada em memória mas não gravada em disco:', e.message);
+    result.persisted = false;
+  }
+  return result;
 }
 
 // --- WARNINGS ---

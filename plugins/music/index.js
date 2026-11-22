@@ -190,9 +190,13 @@ const events = {
     const timer = setTimeout(() => {
       emptyChannelTimers.delete(guild.id);
       const q = distube.getQueue(guild.id);
-      if (!q) return;
       const ch = guild.members.me?.voice?.channel;
       if (ch && ch.members.filter(m => !m.user.bot).size > 0) return;
+      if (!q) {
+        // A fila desapareceu entretanto: ainda há que desligar a ligação vazia
+        leaveVoice(guild.id, undefined);
+        return;
+      }
       q.textChannel?.send('💤 Canal de voz vazio. A sair...').catch(() => {});
       leaveVoice(guild.id, q);
     }, EMPTY_CHANNEL_GRACE_MS);
@@ -233,18 +237,25 @@ const events = {
       await interaction.deferReply();
       try {
         // No DisTube 5.2.3 play() devolve Promise<void>: a confirmação é lida da
-        // fila depois do await (o nome chega pelo evento playSong)
+        // fila depois do await. Contamos o tamanho ANTES para conseguir apontar
+        // para a faixa que acabou de entrar (com fila ativa, songs[0] é a que está
+        // a tocar, não a pedida).
+        const queueBefore = distube.getQueue(interaction.guild.id);
+        const songsBefore = queueBefore ? queueBefore.songs.length : 0;
+
         await distube.play(voiceChannel, query, {
           member,
           textChannel: interaction.channel
         });
+
         const q = distube.getQueue(interaction.guild.id);
-        const current = q?.songs?.[0];
-        if (current) {
-          await interaction.editReply(`🎶 ${String(current.name).slice(0, 100)} — ${q.songs.length > 1 ? `${q.songs.length} músicas na fila` : 'a tocar'}.`);
-        } else {
-          await interaction.editReply('🎶 Pedido aceite.');
+        if (!q || !q.songs.length) {
+          await interaction.editReply('⚠️ O pedido foi aceite mas não ficou nada na fila (verifica o erro no console).');
+          return;
         }
+        const added = q.songs.length > songsBefore ? q.songs[q.songs.length - 1] : q.songs[0];
+        const label = String(added?.name || 'Música').slice(0, 100);
+        await interaction.editReply(`🎶 ${label} — ${q.songs.length > 1 ? `${q.songs.length} músicas na fila` : 'a tocar'}.`);
       } catch (err) {
         console.error('[MUSIC] Erro play:', err.message);
         await interaction.editReply(`❌ Não consegui tocar isso: ${String(err.message).slice(0, 180)}`);

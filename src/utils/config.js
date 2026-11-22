@@ -145,18 +145,17 @@ function saveConfig(newConfig) {
 }
 
 function updateConfig(updates) {
+  // Ler PRIMEIRO e decidir depois: com um config.json ilegível, uma primeira
+  // chamada direta a updateConfig() chegava a gravar as predefinições (token
+  // vazio, password nova) por cima do ficheiro real
+  const current = getConfig();
   if (readFailed) {
-    // A leitura anterior falhou: tenta reler antes de escrever (o ficheiro pode
-    // ter voltado) e nunca escrever as predefinições por cima do ficheiro real
-    readFailed = false;
-    getConfig();
-    if (readFailed && !lastGoodConfig) {
+    if (!lastGoodConfig) {
       console.error('[CONFIG] config.json ilegível e sem cópia em memória: nenhuma alteração gravada (evita apagar a configuração).');
       return null;
     }
-    if (readFailed) console.error('[CONFIG] A gravar a partir da última configuração conhecida em memória — verifica o config.json.');
+    console.error('[CONFIG] config.json ilegível; a gravar a partir da última configuração conhecida em memória — verifica o ficheiro.');
   }
-  const current = getConfig();
   const merged = { ...current, ...updates };
   if (!saveConfig(merged)) {
     console.error('[CONFIG] Falha ao gravar as alterações no disco.');

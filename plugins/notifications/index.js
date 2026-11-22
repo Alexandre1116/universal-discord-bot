@@ -7,6 +7,8 @@ const rss = new RSSParser({ timeout: 10000 });
 // canal de YouTube para Discord diferentes não comem uma à outra o aviso
 const seenItems = new Map();
 const POLL_INTERVAL = 5 * 60 * 1000;
+// Marcador pedido ao decapi para o caso "offline" (resposta comparada por igual)
+const OFFLINE_MARKER = 'decapi:offline';
 let polling = false;
 
 function init(client) {
@@ -111,28 +113,25 @@ async function startPolling(client) {
 
       try {
         const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(10000) : undefined;
-        const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(tw.username)}`, { signal });
+        // O decapi aceita offline_msg; sem ele o texto por omissão é
+        // "<canal> is offline", que leva o nome do canal dentro — e um canal
+        // chamado "offline-guy" contaminava a deteção por substring.
+        const url = `https://decapi.me/twitch/uptime/${encodeURIComponent(tw.username)}?offline_msg=${encodeURIComponent(OFFLINE_MARKER)}`;
+        const res = await fetch(url, { signal });
         if (!res.ok) {
           console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: fornecedor respondeu HTTP ${res.status}.`);
           continue;
         }
         const text = (await res.text()).trim();
 
-        // O decapi devolve a duração ("2 hours, 25 minutes") quando está em
-        // direto e coisas como "offline", "No user with the name X found" ou
-        // avisos de rate-limit quando não está. Detetar em POSITIVO e com o
-        // corpo inteiro ancorado: "try again in 30 seconds" também tem número +
-        // unidade e contava como direto.
-        const providerError = /not\s+found|error|rate limit|too many|slow|invalid|forbidden|unauthorized/i.test(text);
-        if (providerError) {
-          console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: erro do fornecedor ("${text.slice(0, 80)}"); estado mantém-se.`);
-          continue;
-        }
-
-        const isLive = /^\d+\s*(seconds?|minutes?|hours?|days?)([,\s]+\d+\s*(seconds?|minutes?|hours?|days?))*$/i.test(text);
-        const isOffline = /offline/i.test(text);
+        // Duração (precision=4 no decapi): "1 week, 2 days, 3 hours, 4 minutes".
+        // Aceitar só quando TODO o corpo é uma duração: "try again in 30 seconds"
+        // também tem número + unidade e contava como direto.
+        const DURATION = '\\d+\\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)';
+        const isLive = new RegExp(`^${DURATION}([,\\s]+${DURATION})*$`, 'i').test(text);
+        const isOffline = text === OFFLINE_MARKER || /^.{1,60} is offline$/i.test(text);
         if (!isLive && !isOffline) {
-          console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: resposta não reconhecida ("${text.slice(0, 80)}"); estado não alterado.`);
+          console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: resposta não reconhecida ("${text.slice(0, 80)}"); estado mantém-se.`);
           continue;
         }
 
