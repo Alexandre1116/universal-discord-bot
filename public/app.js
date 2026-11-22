@@ -16,7 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
     'tab-join': ['Mensagens de Entrada', 'Personaliza a boas-vindas'],
     'tab-leave': ['Mensagens de Saída', 'Configura o aviso de saída'],
     'tab-voice': ['Canais de Voz Dinâmicos', 'Criação de salas temporárias'],
+    'tab-plugins': ['Plugins', 'Ativar, desativar e instalar plugins'],
     'tab-moderation': ['Auto-Moderação', 'Anti-spam, links, palavras proibidas'],
+    'tab-customcmds': ['Auto-Respostas', 'Comandos personalizados do chat'],
+    'tab-notifications': ['Notificações', 'YouTube e Twitch'],
     'tab-audit': ['Audit Logs', 'Registo automático de eventos'],
     'tab-tickets': ['Sistema de Tickets', 'Suporte com canais privados'],
     'tab-reactionroles': ['Reaction Roles', 'Cargos por botão'],
@@ -24,23 +27,30 @@ document.addEventListener('DOMContentLoaded', () => {
     'tab-embeds': ['Embeds & Agendados', 'Enviar e agendar mensagens'],
     'tab-giveaways': ['Giveaways', 'Sorteios no servidor'],
     'tab-stats': ['Estatísticas', 'Gráficos e dados do servidor'],
-    'tab-settings': ['Definições', 'Token e OAuth2']
+    'tab-settings': ['Definições', 'Token, backups e comandos']
   };
 
   // NAV CLICK
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const tabId = item.getAttribute('data-tab');
-      navItems.forEach(n => n.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
+      const section = document.getElementById(tabId);
+      if (!section) {
+        console.warn(`[NAV] Aba desconhecida: ${tabId}`);
+        return;
+      }
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       item.classList.add('active');
-      document.getElementById(tabId).classList.add('active');
+      section.classList.add('active');
       const t = tabTitles[tabId];
       if (t) { pageTitle.textContent = t[0]; pageSubtitle.textContent = t[1]; }
       // Load tab-specific data
       if (tabId === 'tab-stats') loadStats();
       if (tabId === 'tab-levels') loadLeaderboard();
       if (tabId === 'tab-giveaways') loadGiveaways();
+      if (tabId === 'tab-embeds') loadScheduled();
+      if (tabId === 'tab-plugins') fetchPlugins();
     });
   });
 
@@ -110,15 +120,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const d = currentConfig;
       // Join config
       if (d.joinMessage) {
-        setVal('joinEnabled', d.joinMessage.enabled, true);
+        setVal('joinEnabled', !!d.joinMessage.enabled, 'checked');
         setVal('joinChannelSelect', d.joinMessage.channelId);
         setVal('joinMessageType', d.joinMessage.messageType);
         setVal('joinEmbedTitle', d.joinMessage.embedTitle);
         setVal('joinContent', d.joinMessage.content);
         setVal('joinEmbedColorPicker', d.joinMessage.embedColor || '#5865F2');
         setVal('joinEmbedColor', d.joinMessage.embedColor || '#5865F2');
-        setVal('joinShowAvatar', d.joinMessage.showAvatar, true);
-        setVal('joinGenerateImage', d.joinMessage.generateImage, true);
+        setVal('joinShowAvatar', d.joinMessage.showAvatar !== false, 'checked');
+        setVal('joinGenerateImage', !!d.joinMessage.generateImage, 'checked');
         setVal('joinImageBackgroundUrl', d.joinMessage.imageBackgroundUrl || '');
         updateJoinPreview();
       }
@@ -140,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setVal('presenceText', p.activityText || '');
 
       const b = currentConfig.backup || {};
-      setVal('backupAutoEnabled', b.autoBackup, true);
+      setVal('backupAutoEnabled', !!b.autoBackup, 'checked');
     } catch (e) { console.error(e); }
   }
 
@@ -215,6 +225,9 @@ document.addEventListener('DOMContentLoaded', () => {
       setVal('levelsMinXp', d.minXp || 15);
       setVal('levelsMaxXp', d.maxXp || 25);
       setVal('levelsXpCooldown', d.xpCooldown || 60);
+      setVal('levelsVoiceEnabled', d.voiceXpEnabled !== false, 'checked');
+      setVal('levelsVoiceInterval', d.voiceXpInterval || 60);
+      setVal('levelsVoiceAmount', d.voiceXpAmount || 5);
       setTimeout(() => { if (d.announceChannelId) setVal('levelsAnnounceChannel', d.announceChannelId); }, 500);
       renderLevelRoles(d.roles || []);
     } catch (e) { console.error(e); }
@@ -429,13 +442,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function addCustomCmdRow(trigger = '', response = '', matchType = 'exact') {
     const container = document.getElementById('customCmdsList');
+    if (!container) return;
     // remover state vazio se existir
     const empty = container.querySelector('.empty-state');
     if (empty) empty.remove();
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: !ip)" value="${trigger}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${response}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — sem o !)" value="${trigger}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${response}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -455,12 +469,64 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // PLUGINS
+  function injectPluginTabs(plugins) {
+    const nav = document.querySelector('.nav-menu');
+    const main = document.querySelector('.main-content');
+    if (!nav || !main) return;
+
+    plugins.filter(p => p.hasUi).forEach(p => {
+      const tabId = `tab-plugin-${p.folderId}`;
+      if (document.getElementById(tabId)) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'nav-item';
+      btn.setAttribute('data-tab', tabId);
+      btn.innerHTML = `<i class="fa-solid fa-puzzle-piece"></i><span>${p.displayName || p.name}</span>`;
+
+      const section = document.createElement('section');
+      section.id = tabId;
+      section.className = 'tab-content';
+      section.innerHTML = `<div class="content-card"><div class="card-body plugin-ui-container" data-plugin="${p.folderId}">A carregar a interface do plugin…</div></div>`;
+
+      nav.appendChild(btn);
+      main.appendChild(section);
+
+      btn.addEventListener('click', async () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        section.classList.add('active');
+        pageTitle.textContent = p.displayName || p.name;
+        pageSubtitle.textContent = p.description || `Plugin: ${p.folderId}`;
+
+        const container = section.querySelector('.plugin-ui-container');
+        if (container.dataset.loaded === '1') return;
+        try {
+          const res = await fetch(`/api/plugins-ui/${p.folderId}/ui/tab.html`);
+          if (!res.ok) throw new Error(`tab.html não encontrado (HTTP ${res.status})`);
+          container.innerHTML = await res.text();
+          container.dataset.loaded = '1';
+          // Recria <script> para que sejam efetivamente executados
+          container.querySelectorAll('script').forEach(old => {
+            const fresh = document.createElement('script');
+            if (old.src) fresh.src = old.src; else fresh.textContent = old.textContent;
+            old.replaceWith(fresh);
+          });
+        } catch (err) {
+          container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${err.message}</p>`;
+        }
+      });
+    });
+  }
+
   async function fetchPlugins() {
     try {
       const r = await fetch('/api/plugins'); 
       const plugins = await r.json();
       const list = document.getElementById('pluginsList');
       if (!list) return;
+
+      injectPluginTabs(plugins);
 
       if (plugins.length === 0) {
         list.innerHTML = '<p>Nenhum plugin instalado.</p>';
@@ -474,14 +540,14 @@ document.addEventListener('DOMContentLoaded', () => {
           <div>
             <h5 style="margin: 0; color: #fff;">${p.displayName || p.name} <small style="color: #aaa;">v${p.version || '1.0'}</small></h5>
             <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${p.description || 'Sem descrição.'}</p>
-            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${p.author || 'Desconhecido'} | ID: ${p.folderId}</p>
+            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${p.author || 'Desconhecido'} | ID: ${p.folderId}${p.isOfficial ? ' (oficial)' : ''}</p>
           </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <label class="toggle-switch">
               <input type="checkbox" onchange="togglePlugin('${p.folderId}', this.checked)" ${p.enabled ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.folderId}')"><i class="fa-solid fa-trash"></i></button>
+            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.folderId}')"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </div>`;
       }
@@ -523,32 +589,70 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const r = await fetch('/api/notifications'); const d = await r.json();
       renderNotifications(d.youtube || []);
+      renderTwitch(d.twitch || []);
     } catch (e) { console.error(e); }
   }
-  
+
+  function channelOptions(selected) {
+    let opts = '<option value="">-- Selecionar Canal --</option>';
+    currentGuilds.forEach(g => {
+      if (g.textChannels.length) { opts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}># ${c.name}</option>`).join('')}</optgroup>`; }
+    });
+    return opts;
+  }
+
+  function roleOptions(selected) {
+    return '<option value="">-- Sem cargo --</option>' + serverRoles.map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${r.name}</option>`).join('');
+  }
+
   function renderNotifications(list) {
     const container = document.getElementById('notificationsList');
+    if (!container) return;
     container.innerHTML = '';
     if (!list.length) {
       container.innerHTML = '<div class="empty-state"><p>Sem canais configurados.</p></div>';
     } else {
-      list.forEach(n => addNotificationRow(n.youtubeId, n.channelId, n.message));
+      // Aceita o formato novo {channelId (YouTube), discordChannelId} e o antigo {youtubeId, channelId}
+      list.forEach(n => {
+        const youtubeId = n.youtubeId || n.channelId;
+        const discordChannelId = n.discordChannelId || (n.youtubeId ? n.channelId : '');
+        addNotificationRow(youtubeId, discordChannelId, n.message, n.roleToPing);
+      });
     }
   }
 
-  function addNotificationRow(youtubeId = '', channelId = '', message = '') {
+  function addNotificationRow(youtubeId = '', discordChannelId = '', message = '', roleToPing = '') {
     const container = document.getElementById('notificationsList');
+    if (!container) return;
     const empty = container.querySelector('.empty-state');
     if (empty) empty.remove();
 
-    let channelOpts = '<option value="">-- Selecionar Canal --</option>';
-    currentGuilds.forEach(g => {
-      if (g.textChannels.length) { channelOpts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}" ${c.id === channelId ? 'selected' : ''}># ${c.name}</option>`).join('')}</optgroup>`; }
-    });
+    const row = document.createElement('div');
+    row.className = 'rr-role-row';
+    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${youtubeId}"><select class="form-control notif-channel">${channelOptions(discordChannelId)}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem (usa {title} {url})" value="${message || ''}"><select class="form-control notif-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    container.appendChild(row);
+  }
+
+  function renderTwitch(list) {
+    const container = document.getElementById('twitchList');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!list.length) {
+      container.innerHTML = '<div class="empty-state"><p>Sem canais Twitch.</p></div>';
+    } else {
+      list.forEach(t => addTwitchRow(t.username, t.discordChannelId, t.roleToPing));
+    }
+  }
+
+  function addTwitchRow(username = '', discordChannelId = '', roleToPing = '') {
+    const container = document.getElementById('twitchList');
+    if (!container) return;
+    const empty = container.querySelector('.empty-state');
+    if (empty) empty.remove();
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${youtubeId}"><select class="form-control notif-channel">${channelOpts}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem {url} {title}" value="${message}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<input type="text" class="form-control tw-name" placeholder="Nome do canal Twitch" value="${username}"><select class="form-control tw-channel">${channelOptions(discordChannelId)}</select><select class="form-control tw-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -559,12 +663,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const youtube = [];
     rows.forEach(row => {
       const youtubeId = row.querySelector('.notif-ytid').value.trim();
-      const channelId = row.querySelector('.notif-channel').value;
+      const discordChannelId = row.querySelector('.notif-channel').value;
       const message = row.querySelector('.notif-msg').value.trim();
-      if (youtubeId && channelId) youtube.push({ youtubeId, channelId, message });
+      const roleToPing = row.querySelector('.notif-role')?.value || '';
+      if (youtubeId && discordChannelId) youtube.push({ channelId: youtubeId, youtubeId, discordChannelId, message, roleToPing });
     });
     const r = await postJson('/api/notifications', { youtube });
     showToast(r.success ? 'Notificações guardadas!' : r.error, !r.success);
+  });
+
+  document.getElementById('btnAddTwitch')?.addEventListener('click', () => addTwitchRow());
+  document.getElementById('formTwitchNotifications')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const rows = document.querySelectorAll('#twitchList .rr-role-row');
+    const twitch = [];
+    rows.forEach(row => {
+      const username = row.querySelector('.tw-name').value.trim();
+      const discordChannelId = row.querySelector('.tw-channel').value;
+      const roleToPing = row.querySelector('.tw-role')?.value || '';
+      if (username && discordChannelId) twitch.push({ username, discordChannelId, roleToPing });
+    });
+    const r = await postJson('/api/notifications', { twitch });
+    showToast(r.success ? 'Notificações Twitch guardadas!' : r.error, !r.success);
   });
 
   function addRrRoleRow() {
@@ -601,7 +721,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     await postJson('/api/levels/config', {
       enabled: getChecked('levelsEnabled'), minXp: parseInt(getVal('levelsMinXp')), maxXp: parseInt(getVal('levelsMaxXp')),
-      xpCooldown: parseInt(getVal('levelsXpCooldown')), announceChannelId: getVal('levelsAnnounceChannel'), roles
+      xpCooldown: parseInt(getVal('levelsXpCooldown')), announceChannelId: getVal('levelsAnnounceChannel'), roles,
+      voiceXpEnabled: getChecked('levelsVoiceEnabled'),
+      voiceXpInterval: parseInt(getVal('levelsVoiceInterval')) || 60,
+      voiceXpAmount: parseInt(getVal('levelsVoiceAmount')) || 5
     });
     showToast('Níveis guardados!');
   });

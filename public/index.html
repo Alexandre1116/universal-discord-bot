@@ -48,7 +48,7 @@
         <button class="nav-item" data-tab="tab-leave"><i class="fa-solid fa-user-minus"></i><span>Saídas</span></button>
         <button class="nav-item" data-tab="tab-voice"><i class="fa-solid fa-microphone-lines"></i><span>Canais de Voz</span></button>
         <div class="nav-divider"></div>
-        <button class="nav-item" data-tab="tab-modules"><i class="fa-solid fa-puzzle-piece"></i><span>Módulos</span></button>
+        <button class="nav-item" data-tab="tab-plugins"><i class="fa-solid fa-puzzle-piece"></i><span>Plugins</span></button>
         <div class="nav-divider"></div>
         <button class="nav-item" data-tab="tab-moderation"><i class="fa-solid fa-shield-halved"></i><span>Moderação</span></button>
         <button class="nav-item" data-tab="tab-customcmds"><i class="fa-solid fa-message"></i><span>Auto-Respostas</span></button>
@@ -219,11 +219,19 @@
       <!-- TAB: NOTIFICAÇÕES -->
       <section id="tab-notifications" class="tab-content">
         <div class="content-card"><div class="card-header"><h3><i class="fa-brands fa-youtube"></i> Notificações (YouTube)</h3></div><div class="card-body">
-          <p class="description-text">O bot verifica automaticamente novos vídeos e avisa no canal escolhido.</p>
+          <p class="description-text">O bot verifica automaticamente novos vídeos e avisa no canal escolhido. Usa o ID do canal do YouTube (ex: <code>UCxxxxxxxx</code>), não o nome.</p>
           <form id="formNotifications">
             <div id="notificationsList" class="rr-roles-container"></div>
             <button type="button" class="btn btn-outline" id="btnAddNotification" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Canal YouTube</button>
             <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Notificações</button></div>
+          </form>
+        </div></div>
+        <div class="content-card" style="margin-top:20px;"><div class="card-header"><h3><i class="fa-brands fa-twitch"></i> Notificações (Twitch)</h3></div><div class="card-body">
+          <p class="description-text">Avisa quando um canal de Twitch entra em direto (verificação a cada 5 minutos).</p>
+          <form id="formTwitchNotifications">
+            <div id="twitchList" class="rr-roles-container"></div>
+            <button type="button" class="btn btn-outline" id="btnAddTwitch" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Canal Twitch</button>
+            <div class="form-actions"><button type="submit" class="btn btn-success"><i class="fa-solid fa-floppy-disk"></i> Guardar Notificações Twitch</button></div>
           </form>
         </div></div>
       </section>
@@ -286,6 +294,8 @@
             <form id="formLevels">
               <div class="form-row"><div class="form-group half"><label>XP Mínimo por Mensagem</label><input type="number" id="levelsMinXp" class="form-control" value="15" min="1"></div><div class="form-group half"><label>XP Máximo por Mensagem</label><input type="number" id="levelsMaxXp" class="form-control" value="25" min="1"></div></div>
               <div class="form-row"><div class="form-group half"><label>Cooldown (segundos)</label><input type="number" id="levelsXpCooldown" class="form-control" value="60" min="10"></div><div class="form-group half"><label>Canal de Anúncios de Level-Up</label><select id="levelsAnnounceChannel" class="form-control"><option value="">Canal da mensagem</option></select></div></div>
+              <div class="form-row"><div class="form-group half checkbox-group"><label class="checkbox-label"><input type="checkbox" id="levelsVoiceEnabled" checked><span>🎙️ XP por estar em canal de voz</span></label><small class="form-help">Ganha XP passivamente enquanto estiver numa sala de voz.</small></div><div class="form-group half"><label>Intervalo de XP de voz (segundos)</label><input type="number" id="levelsVoiceInterval" class="form-control" value="60" min="10"></div></div>
+              <div class="form-row"><div class="form-group half"><label>XP de voz por intervalo</label><input type="number" id="levelsVoiceAmount" class="form-control" value="5" min="1"></div><div class="form-group half"></div></div>
               <h4>Recompensas Automáticas</h4>
               <div id="levelRolesList" class="rr-roles-container"></div>
               <button type="button" class="btn btn-outline" id="btnAddLevelRole" style="margin-bottom:16px"><i class="fa-solid fa-plus"></i> Adicionar Recompensa</button>

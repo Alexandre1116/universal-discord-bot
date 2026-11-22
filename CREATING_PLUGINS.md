@@ -35,7 +35,7 @@ O ficheiro `plugin.json` identifica o teu módulo e a forma como o painel o apre
   "description": "Uma breve descrição do que o plugin faz no Discord."
 }
 ```
-*Atenção: O campo `name` será usado para a chave de ativação interna, pelo que não deve ter espaços ou caracteres especiais.*
+*Atenção: a chave usada para ativar/desativar o plugin é o **nome da pasta** (o `folderId`, que é o nome do repositório). Evita que o nome da pasta tenha espaços ou caracteres especiais.*
 
 ---
 
@@ -44,8 +44,9 @@ O ficheiro `plugin.json` identifica o teu módulo e a forma como o painel o apre
 Este é o cérebro do teu plugin. O bot principal espera que este ficheiro exporte objetos específicos, dependendo daquilo que pretendes fazer. Podes exportar:
 
 - `commands`: Um array de `SlashCommandBuilder` (comandos de barra do Discord).
-- `events`: Um objeto com ouvintes de eventos (ex: `interactionCreate`, `messageCreate`).
+- `events`: Um objeto com ouvintes de eventos (ex: `interactionCreate`, `messageCreate`). O primeiro argumento de cada handler é sempre o `client`; os restantes são os argumentos do evento do discord.js.
 - `init`: Uma função que será executada imediatamente quando o bot liga ou quando o plugin é carregado.
+- `routes`: (Opcional) Função que recebe o objeto do Express para registares rotas HTTP tuas (ex: `app.get('/api/meu-plugin', ...)`).
 
 ### Exemplo Base do `index.js`
 
@@ -97,6 +98,7 @@ Se o teu plugin necessitar de uma página de configurações no Painel Web (Web 
 Ao fazeres isto:
 1. O Core adiciona automaticamente um botão de menu na lateral esquerda do painel.
 2. O conteúdo do teu `tab.html` será carregado nativamente (podendo injetar ecrãs de definição diretamente na interface central).
+3. Todos os ficheiros dentro de `ui/` são servidos em `/api/plugins-ui/<nome-da-pasta>/ui/...` — usa caminhos **relativos** no HTML (ex: `<script src="script.js"></script>`), porque o `tab.html` é injetado na página principal.
 
 *As credenciais e lógica de gravação na interface do utilizador já partilham as classes CSS e funções globais da Dashboard padrão (como os avisos de toast).*
 
