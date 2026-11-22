@@ -65,12 +65,34 @@ function init(client) {
             forget(guildId, entry.channelId);
             console.log(`[VOICE HUBS] Canal temporário órfão removido: ${entry.channelId}`);
           } catch (err) {
-            console.error('[VOICE HUBS] Erro ao remover canal órfão:', err.message);
+            // 10003 = o canal já não existe: há que esquecer o registo, senão o
+            // erro repete-se a cada 2 minutos para sempre
+            if (err.code === 10003) forget(guildId, entry.channelId);
+            else console.error('[VOICE HUBS] Erro ao remover canal órfão:', err.message);
           }
         }
       }
     }
   }, 2 * 60 * 1000);
+}
+
+// Apaga o canal temporário de onde o membro saiu, se ficou vazio
+async function cleanupDepartedTempChannel(guild, departedChannelId) {
+  const channels = tempChannels.get(guild.id) || [];
+  const tempInfo = channels.find(c => c.channelId === departedChannelId);
+  if (!tempInfo) return;
+
+  const channel = guild.channels.cache.get(departedChannelId);
+  if (!channel || channel.members.size > 0) return;
+
+  try {
+    await channel.delete('Canal temporário vazio.');
+    forget(guild.id, departedChannelId);
+    console.log(`[VOICE HUBS] Canal temporário removido: ${departedChannelId}`);
+  } catch (err) {
+    if (err.code === 10003) forget(guild.id, departedChannelId);
+    else console.error('[VOICE HUBS] Erro ao remover canal temporário:', err.message);
+  }
 }
 
 const events = {
@@ -79,6 +101,14 @@ const events = {
     const voiceHubs = config.voiceHubs || [];
     if (voiceHubs.length === 0) return;
 
+    // 1) Saiu de um canal temporário? Tratamos primeiro: antes, quando o destino
+    // era o próprio hub, o ramo do hub fazia return e o canal antigo ficava para
+    // trás (só desaparecia no cleanup de 2 minutos).
+    if (oldState.channelId && oldState.channelId !== newState.channelId) {
+      await cleanupDepartedTempChannel(newState.guild || oldState.guild, oldState.channelId);
+    }
+
+    // 2) Entrou num hub → criar canal temporário
     const hub = voiceHubs.find(h => h.channelId === newState.channelId);
     if (hub) {
       try {
@@ -127,24 +157,6 @@ const events = {
         console.error('[VOICE HUBS] Erro ao criar canal temporário:', err.message);
       }
       return;
-    }
-
-    if (oldState.channelId && oldState.channelId !== newState.channelId) {
-      const guild = newState.guild;
-      const channels = tempChannels.get(guild.id) || [];
-      const tempInfo = channels.find(c => c.channelId === oldState.channelId);
-      if (tempInfo) {
-        const channel = guild.channels.cache.get(oldState.channelId);
-        if (channel && channel.members.size === 0) {
-          try {
-            await channel.delete('Canal temporário vazio.');
-            forget(guild.id, oldState.channelId);
-            console.log(`[VOICE HUBS] Canal temporário removido: ${oldState.channelId}`);
-          } catch (err) {
-            console.error('[VOICE HUBS] Erro ao remover canal temporário:', err.message);
-          }
-        }
-      }
     }
   }
 };

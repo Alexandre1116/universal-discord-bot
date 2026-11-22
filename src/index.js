@@ -16,7 +16,7 @@ const { client, initBot } = require('./bot/client');
 const apiRoutes = require('./server/api');
 const apiExtendedRoutes = require('./server/apiExtended');
 const { authMiddleware, setupAuthRoutes } = require('./server/auth');
-const { getDb, recordMemberCount, pruneMemberHistory } = require('./utils/database');
+const { getDb, recordMemberCount } = require('./utils/database');
 const { getConfig, updateConfig } = require('./utils/config');
 const { loadPlugins } = require('./utils/pluginManager');
 const { startScheduledMessages } = require('./bot/services/scheduledMessages');
@@ -131,7 +131,6 @@ client.once(Events.ClientReady, async () => {
         for (const guild of client.guilds.cache.values()) {
           recordMemberCount(guild.id, guild.memberCount);
         }
-        pruneMemberHistory(90);
       };
       snapshotMembers();
       cron.schedule('0 * * * *', snapshotMembers); // a cada hora

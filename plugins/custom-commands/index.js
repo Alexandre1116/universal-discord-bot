@@ -1,13 +1,17 @@
 const { EmbedBuilder } = require('discord.js');
 const { getConfig } = require('../../src/utils/config');
 
+const PREFIX = '!';
+
 function init(client) {
   console.log('[CUSTOM COMMANDS] Plugin inicializado.');
 }
 
-// Normaliza o trigger: aceita ter sido gravado com ou sem prefixo ("!regras" ou "regras")
-function stripPrefix(value) {
-  return String(value || '').trim().replace(/^[!/?>.]+/, '');
+// Normaliza APENAS o prefixo duplicado: um trigger gravado como "!regras" deixa
+// de ser comparado como "!!regras". A exigência do prefixo mantém-se — sem ela,
+// palavras normais de conversa passariam a disparar auto-respostas.
+function normalizeTrigger(value) {
+  return String(value || '').trim().replace(/^!+/, '');
 }
 
 function fillTemplate(text, message) {
@@ -31,26 +35,28 @@ const events = {
     if (customCommands.length === 0) return;
 
     const content = message.content.trim();
-    if (!content) return;
-    const contentNoPrefix = stripPrefix(content);
+    if (!content.startsWith(PREFIX)) return; // o prefixo é obrigatório
+
+    const contentWithoutPrefix = content.slice(PREFIX.length).trim();
 
     for (const cmd of customCommands) {
       if (!cmd.trigger || !cmd.response) continue;
 
       const matchType = cmd.matchType || 'exact';
-      // Para regex usa-se o padrão TAL COMO foi gravado: tirar o prefixo
-      // corrompia padrões como ".*promo" ou "!help|?ajuda".
-      const trigger = matchType === 'regex' ? String(cmd.trigger).trim() : stripPrefix(cmd.trigger);
+      // Em regex usa-se o padrão TAL COMO foi gravado (remover o prefixo
+      // corrompia padrões como ".*promo" ou "!help|?ajuda")
+      const rawTrigger = String(cmd.trigger).trim();
+      const trigger = matchType === 'regex' ? rawTrigger : normalizeTrigger(rawTrigger);
       if (!trigger) continue;
-      let matched = false;
 
+      let matched = false;
       try {
         if (matchType === 'regex') {
-          matched = new RegExp(trigger, 'i').test(content);
+          matched = new RegExp(trigger, 'i').test(contentWithoutPrefix);
         } else if (matchType === 'startsWith') {
-          matched = contentNoPrefix.toLowerCase().startsWith(trigger.toLowerCase());
+          matched = contentWithoutPrefix.toLowerCase().startsWith(trigger.toLowerCase());
         } else {
-          matched = contentNoPrefix.toLowerCase() === trigger.toLowerCase();
+          matched = contentWithoutPrefix.toLowerCase() === trigger.toLowerCase();
         }
       } catch (err) {
         console.error(`[CUSTOM COMMANDS] Regex inválida no comando "${cmd.trigger}":`, err.message);

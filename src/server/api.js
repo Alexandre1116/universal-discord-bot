@@ -51,9 +51,16 @@ router.delete('/plugins/:id', (req, res) => {
 // Serve APENAS a pasta ui/ dos plugins instalados. Antes, express.static nas
 // raízes de data/plugins e plugins/ expunha index.js, plugin.json e
 // node_modules de qualquer plugin a quem tivesse sessão no painel.
+const PLUGIN_ID_RE = /^[A-Za-z0-9._-]+$/;
+
 router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
   try {
-    const base = getPluginPath(req.params.folderId);
+    const folderId = req.params.folderId;
+    if (!PLUGIN_ID_RE.test(folderId) || folderId === '..' || folderId === '.') {
+      return res.status(400).json({ success: false, error: 'Identificador de plugin inválido.' });
+    }
+
+    const base = getPluginPath(folderId);
     if (!base) return res.status(404).json({ success: false, error: 'Plugin não encontrado.' });
 
     const uiDir = path.resolve(base, 'ui');
@@ -61,10 +68,22 @@ router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
     if (target !== uiDir && !target.startsWith(uiDir + path.sep)) {
       return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
     }
-    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+
+    // realpath: bloqueia links simbólicos que apontem para fora da pasta ui/
+    let realUiDir, realTarget;
+    try {
+      realUiDir = fs.realpathSync(uiDir);
+      realTarget = fs.realpathSync(target);
+    } catch (err) {
       return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
     }
-    res.sendFile(target);
+    if (realTarget !== realUiDir && !realTarget.startsWith(realUiDir + path.sep)) {
+      return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
+    }
+    if (!fs.statSync(realTarget).isFile()) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
+    }
+    res.sendFile(realTarget);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -121,7 +140,7 @@ router.post('/config', (req, res) => {
       });
     }
 
-    res.json({ success: true, config: updated });
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

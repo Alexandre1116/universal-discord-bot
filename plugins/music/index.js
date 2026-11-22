@@ -3,6 +3,23 @@ const DisTube = require('distube');
 
 let distube = null;
 let musicInitError = null;
+// Saídas iniciadas por nós: evita a mensagem duplicada de "desconectado"
+const selfDisconnects = new Set();
+// Temporizadores de "canal vazio" (dão margem a quem só troca de canal)
+const emptyChannelTimers = new Map();
+const EMPTY_CHANNEL_GRACE_MS = 30000;
+
+function leaveVoice(guildId, queue) {
+  selfDisconnects.add(guildId);
+  try {
+    if (queue?.voice) queue.voice.leave();
+    else if (distube) distube.voices.leave(guildId);
+  } catch (err) {
+    console.error('[MUSIC] Erro ao sair do canal de voz:', err.message);
+  }
+  // A flag não pode ficar para sempre se o evento disconnect não chegar
+  setTimeout(() => selfDisconnects.delete(guildId), 5000).unref?.();
+}
 
 function init(client) {
   try {
@@ -56,13 +73,12 @@ function init(client) {
       // 'empty' deixou de ser emitido — por isso o leave é explícito.
       .on('finish', (queue) => {
         queue.textChannel?.send('🏁 Fila terminada. A sair do canal de voz.').catch(() => {});
-        try {
-          queue.voice?.leave();
-        } catch (err) {
-          console.error('[MUSIC] Erro ao sair do canal de voz:', err.message);
-        }
+        leaveVoice(queue.id, queue);
       })
       .on('disconnect', (queue) => {
+        // Quando somos nós que desligamos (finish/stop/canal vazio) a outra
+        // mensagem já foi dada — não repetimos
+        if (queue && selfDisconnects.has(queue.id)) return;
         queue.textChannel?.send('🔌 Desconectado do canal de voz. Fila limpa.').catch(() => {});
       })
       // Assinatura do DisTube v5: (error, queue, song)
@@ -132,20 +148,42 @@ const events = {
     if (!guild) return;
 
     const queue = distube.getQueue(guild.id);
-    if (!queue) return;
+    if (!queue) {
+      const t = emptyChannelTimers.get(guild.id);
+      if (t) {
+        clearTimeout(t);
+        emptyChannelTimers.delete(guild.id);
+      }
+      return;
+    }
 
     const channel = guild.members.me?.voice?.channel;
     if (!channel) return;
 
     const humans = channel.members.filter(m => !m.user.bot);
-    if (humans.size > 0) return;
-
-    queue.textChannel?.send('💤 Canal de voz vazio. A sair...').catch(() => {});
-    try {
-      queue.voice.leave();
-    } catch (err) {
-      console.error('[MUSIC] Erro ao sair de canal de voz vazio:', err.message);
+    if (humans.size > 0) {
+      // Alguém voltou (ou só trocou de canal): cancela a saída agendada
+      const pending = emptyChannelTimers.get(guild.id);
+      if (pending) {
+        clearTimeout(pending);
+        emptyChannelTimers.delete(guild.id);
+      }
+      return;
     }
+
+    // Margem: evita desligar se o único ouvinte estiver apenas a trocar de canal
+    if (emptyChannelTimers.has(guild.id)) return;
+    const timer = setTimeout(() => {
+      emptyChannelTimers.delete(guild.id);
+      const q = distube.getQueue(guild.id);
+      if (!q) return;
+      const ch = guild.members.me?.voice?.channel;
+      if (ch && ch.members.filter(m => !m.user.bot).size > 0) return;
+      q.textChannel?.send('💤 Canal de voz vazio. A sair...').catch(() => {});
+      leaveVoice(guild.id, q);
+    }, EMPTY_CHANNEL_GRACE_MS);
+    timer.unref?.();
+    emptyChannelTimers.set(guild.id, timer);
   },
 
   interactionCreate: async (client, interaction) => {
@@ -180,11 +218,18 @@ const events = {
       const query = interaction.options.getString('query');
       await interaction.deferReply();
       try {
-        await distube.play(voiceChannel, query, {
+        // distube.play() resolve com { song, error } — aguardar e confirmar
+        // evita anunciar "a procurar" quando o pedido já falhou ou já entrou na fila
+        const result = await distube.play(voiceChannel, query, {
           member,
           textChannel: interaction.channel
         });
-        await interaction.editReply(`🔍 A procurar: \`${query.slice(0, 100)}\`...`);
+        if (result?.error) {
+          await interaction.editReply(`❌ Não consegui tocar isso: ${String(result.error.message || result.error).slice(0, 180)}`);
+          return;
+        }
+        const name = String(result?.song?.name || 'Música').slice(0, 100);
+        await interaction.editReply(`🎶 ${name} — na fila ${result?.song?.formattedDuration ? `(${result.song.formattedDuration})` : ''}.`);
       } catch (err) {
         console.error('[MUSIC] Erro play:', err.message);
         await interaction.editReply(`❌ Não consegui tocar isso: ${String(err.message).slice(0, 180)}`);
@@ -230,7 +275,10 @@ const events = {
       case 'stop':
         try {
           if (queue) await queue.stop();
-          await interaction.reply('⏹️ Música parada e fila limpa.');
+          // No DisTube v5 Queue.stop() apenas pára o áudio (voice.stop + remove)
+          // e deixa a ligação: sem isto o bot fica preso no canal de voz
+          leaveVoice(interaction.guild.id, queue || undefined);
+          await interaction.reply('⏹️ Música parada, fila limpa e a sair do canal de voz.');
         } catch (err) {
           await interaction.reply({ content: `❌ ${String(err.message).slice(0, 150)}`, ephemeral: true });
         }

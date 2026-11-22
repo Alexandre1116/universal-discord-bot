@@ -9,14 +9,18 @@ function init(client) {
   console.log('[LEVELS XP] Plugin inicializado.');
 
   // Quem já estava em canal de voz quando o bot ligou também ganha XP
-  // (o cache dos servidores ainda pode estar a ser preenchido, daí o atraso)
-  setTimeout(() => {
+  // (o cache dos servidores ainda pode estar a ser preenchido, daí o atraso).
+  // A reconciliação repete-se para apanhar quem entra em voz enquanto a
+  // definição esteve desligada e volta a ser ligada.
+  const reconcile = () => {
     try {
       reconcileVoiceSessions(client, getConfig().levels || {});
     } catch (err) {
       console.error('[LEVELS XP] Erro ao retomar sessões de voz:', err.message);
     }
-  }, 15000);
+  };
+  setTimeout(reconcile, 15000);
+  setInterval(reconcile, 2 * 60 * 1000);
 }
 
 const commands = [
@@ -61,12 +65,13 @@ async function grantRoleRewards(guild, memberId, levelsConfig, result) {
   }
 }
 
-async function announceLevelUp(client, guild, userId, result, levelsConfig, fromVoice) {
+async function announceLevelUp(client, guild, userId, result, levelsConfig, fromVoice, fallbackChannel) {
   const announceChannelId = levelsConfig.announceChannelId;
-  if (!announceChannelId) return;
-
-  const channel = guild.channels.cache.get(announceChannelId) ||
-    await guild.channels.fetch(announceChannelId).catch(() => null);
+  // Sem canal de anúncios configurado, anunciar no canal onde o XP foi ganho
+  // (a UI apresenta o campo como opcional; antes não dizia nada sem ele)
+  const channel = announceChannelId
+    ? (guild.channels.cache.get(announceChannelId) || await guild.channels.fetch(announceChannelId).catch(() => null))
+    : (fallbackChannel && fallbackChannel.isTextBased() ? fallbackChannel : null);
   if (!channel || !channel.isTextBased()) return;
 
   try {
@@ -85,7 +90,7 @@ async function announceLevelUp(client, guild, userId, result, levelsConfig, from
   }
 }
 
-async function awardXp(client, guild, userId, amount, levelsConfig, fromVoice = false) {
+async function awardXp(client, guild, userId, amount, levelsConfig, fromVoice = false, fallbackChannel = null) {
   // O XP de voz não conta como mensagem nem consome o cooldown do XP por mensagem
   const result = fromVoice ? addVoiceXp(guild.id, userId, amount) : addXp(guild.id, userId, amount);
 
@@ -95,7 +100,7 @@ async function awardXp(client, guild, userId, amount, levelsConfig, fromVoice = 
   await grantRoleRewards(guild, userId, levels, result);
 
   if (result.leveledUp) {
-    await announceLevelUp(client, guild, userId, result, levels, fromVoice);
+    await announceLevelUp(client, guild, userId, result, levels, fromVoice, fallbackChannel);
   }
 
   return result;
@@ -145,13 +150,27 @@ function startVoiceTimer(client, guild, userId, levelsConfig) {
 }
 
 // Quem já estava em canal de voz quando o bot ligou também ganha XP
+function stopAllVoiceTimers() {
+  for (const [guildId, timers] of voiceTimers.entries()) {
+    for (const timer of timers.values()) clearInterval(timer);
+    timers.clear();
+    voiceTimers.delete(guildId);
+  }
+}
+
+// Re-liga timers para quem já está em voz (no arranque e sempre que a
+// configuração volta a ser ativada)
 function reconcileVoiceSessions(client, levelsConfig) {
-  if (!levelsConfig.enabled || levelsConfig.voiceXpEnabled === false) return;
+  if (!levelsConfig.enabled || levelsConfig.voiceXpEnabled === false) {
+    stopAllVoiceTimers();
+    return;
+  }
   for (const guild of client.guilds.cache.values()) {
     for (const state of guild.voiceStates.cache.values()) {
-      const memberId = state.memberId;
+      // VoiceState usa .id (o user_id); 'memberId' não existe no discord.js v14
+      const memberId = state.id;
       if (!memberId || state.channelId == null) continue;
-      if (state.member?.user?.bot) continue;
+      if (!state.member || state.member.user.bot) continue;
       startVoiceTimer(client, guild, memberId, levelsConfig);
     }
   }
@@ -172,7 +191,7 @@ const events = {
     const maxXp = levelsConfig.maxXp || 25;
     const xpGain = Math.floor(Math.random() * (maxXp - minXp + 1)) + minXp;
 
-    await awardXp(client, message.guild, message.author.id, xpGain, levelsConfig, false);
+    await awardXp(client, message.guild, message.author.id, xpGain, levelsConfig, false, message.channel);
   },
 
   voiceStateUpdate: async (client, oldState, newState) => {
@@ -199,7 +218,13 @@ const events = {
   },
 
   guildDelete: (client, guild) => {
-    // Não deixa timers a correr por servidores que o bot deixou de ver
+    // Cancela os intervalos um a um: apagar só o Map deixava timers a correr
+    // para sempre com o servidor em closure
+    const timers = voiceTimers.get(guild.id);
+    if (timers) {
+      for (const timer of timers.values()) clearInterval(timer);
+      timers.clear();
+    }
     voiceTimers.delete(guild.id);
   },
 

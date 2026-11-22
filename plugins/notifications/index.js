@@ -110,16 +110,34 @@ async function startPolling(client) {
       const liveKey = `twitch:${tw.username.toLowerCase()}:${tw.discordChannelId}`;
 
       try {
-        const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(tw.username)}`);
+        const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(10000) : undefined;
+        const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(tw.username)}`, { signal });
         if (!res.ok) {
           console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: fornecedor respondeu HTTP ${res.status}.`);
           continue;
         }
-        const text = await res.text();
-        const isLive = !text.toLowerCase().includes('offline') && !text.toLowerCase().includes('error');
-        const wasLive = seenItems.get(liveKey) === true;
+        const text = (await res.text()).trim();
 
-        if (isLive && !wasLive) {
+        // O decapi devolve "2 hours, 11 minutes" quando está em direto e coisas
+        // como "offline", "No user with the name X found" ou avisos de rate-limit
+        // quando não está. Detetar em POSITIVO: tratar corpo desconhecido como
+        // "em direto" gerava anúncios falsos.
+        const isLive = /\d+\s*(second|minute|hour|day)/i.test(text);
+        const recognised = isLive || /offline|not\s+found|error|rate|slow|invalid/i.test(text);
+        if (!recognised) {
+          console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: resposta não reconhecida ("${text.slice(0, 80)}"); estado não alterado.`);
+          continue;
+        }
+
+        const wasLive = seenItems.get(liveKey);
+        // Primeira verificação depois do arranque: só regista o estado (senão um
+        // restart com o streamer em direto volta a anunciar a mesma stream)
+        if (wasLive === undefined) {
+          seenItems.set(liveKey, isLive);
+          continue;
+        }
+
+        if (isLive && wasLive !== true) {
           const channel = client.channels.cache.get(tw.discordChannelId) ||
             await client.channels.fetch(tw.discordChannelId).catch(() => null);
           if (!channel || !channel.isTextBased()) {

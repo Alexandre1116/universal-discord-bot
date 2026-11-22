@@ -39,6 +39,10 @@ function scanPluginsDir(dir, isOfficial) {
 }
 
 function getPluginPath(folderId) {
+  // Identificadores vêm de parâmetros de API: nada de separadores ou traversal
+  if (typeof folderId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(folderId) || folderId === '.' || folderId === '..') {
+    return null;
+  }
   const userPath = path.join(USER_PLUGINS_DIR, folderId);
   if (fs.existsSync(path.join(userPath, 'plugin.json'))) return userPath;
   const officialPath = path.join(OFFICIAL_PLUGINS_DIR, folderId);
@@ -70,6 +74,11 @@ function installPluginFromGithub(url) {
     const parts = url.split('/');
     let repoName = parts[parts.length - 1];
     if (repoName.endsWith('.git')) repoName = repoName.slice(0, -4);
+
+    // O nome vira caminho no disco: rejeita tudo o que possa fazer traversal
+    if (!/^[A-Za-z0-9._-]+$/.test(repoName) || repoName === '.' || repoName === '..') {
+      throw new Error('Nome de repositório inválido.');
+    }
 
     const pluginPath = path.join(USER_PLUGINS_DIR, repoName);
 

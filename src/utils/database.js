@@ -102,6 +102,13 @@ function initTables() {
     created_at TEXT DEFAULT (datetime('now'))
   )`);
 
+  // Migração tolerante: bases de dados antigas não têm a coluna dos vencedores
+  try {
+    db.run('ALTER TABLE giveaways ADD COLUMN winners TEXT');
+  } catch (e) {
+    // no-op quando a coluna já existe
+  }
+
   db.run(`CREATE TABLE IF NOT EXISTS giveaway_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     giveaway_id INTEGER NOT NULL,
@@ -209,8 +216,10 @@ function addXp(guildId, userId, amount) {
   const existing = queryOne('SELECT * FROM xp_levels WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
   if (!existing) {
-    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages, last_xp_at) VALUES (?, ?, ?, 0, 1, datetime(\'now\'))', [guildId, userId, amount]);
-    return { xp: amount, level: 0, leveledUp: false };
+    // O primeiro ganho também pode cruzar níveis — calcular em vez de gravar 0
+    const firstLevel = calculateLevel(amount);
+    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages, last_xp_at) VALUES (?, ?, ?, ?, 1, datetime(\'now\'))', [guildId, userId, amount, firstLevel]);
+    return { xp: amount, level: firstLevel, leveledUp: firstLevel > 0 };
   }
 
   const newXp = existing.xp + amount;
@@ -227,8 +236,9 @@ function addVoiceXp(guildId, userId, amount) {
   const existing = queryOne('SELECT * FROM xp_levels WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
 
   if (!existing) {
-    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages) VALUES (?, ?, ?, 0, 0)', [guildId, userId, amount]);
-    return { xp: amount, level: 0, leveledUp: false };
+    const firstLevel = calculateLevel(amount);
+    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages) VALUES (?, ?, ?, ?, 0)', [guildId, userId, amount, firstLevel]);
+    return { xp: amount, level: firstLevel, leveledUp: firstLevel > 0 };
   }
 
   const newXp = existing.xp + amount;
@@ -292,8 +302,11 @@ function getActiveGiveaways() {
   return queryAll('SELECT * FROM giveaways WHERE ended = 0');
 }
 
-function endGiveaway(giveawayId) {
-  return runSql('UPDATE giveaways SET ended = 1 WHERE id = ?', [giveawayId]);
+function endGiveaway(giveawayId, winners) {
+  // Persiste vencedores junto do encerramento: se o anúncio falhar, o resultado
+  // existe em BD e pode ser reenviado/recolocado sem voltar a sortear
+  const list = Array.isArray(winners) ? winners.join(',') : (winners || '');
+  return runSql('UPDATE giveaways SET ended = 1, winners = ? WHERE id = ?', [list, giveawayId]);
 }
 
 function getGiveawayByMessage(messageId) {
@@ -361,12 +374,16 @@ function getMemberHistory(guildId, days = 30) {
   // recorded_at é gravado por SQLite como 'YYYY-MM-DD HH:MM:SS', por isso o
   // limite tem de ser comparado no mesmo formato (não em ISO 8601 com 'T'/'Z')
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
-  // Um ponto por dia (o máximo desse dia): a Web UI mostra rótulos MM-DD e
-  // instantâneos horários repetiriam o mesmo rótulo dezenas de vezes
-  return queryAll('SELECT DATE(recorded_at) as recorded_at, MAX(member_count) as member_count FROM member_history WHERE guild_id = ? AND recorded_at >= ? GROUP BY DATE(recorded_at) ORDER BY recorded_at', [guildId, since]);
+  // Um ponto por dia: a ÚLTIMA amostra desse dia (o máximo do dia faria o
+  // gráfico subir sempre para o pico e esconder perdas de membros)
+  return queryAll(`SELECT DATE(recorded_at) as recorded_at, member_count FROM member_history mh
+    WHERE guild_id = ? AND recorded_at >= ?
+      AND id = (SELECT MAX(id) FROM member_history m2 WHERE m2.guild_id = mh.guild_id AND DATE(m2.recorded_at) = DATE(mh.recorded_at))
+    ORDER BY recorded_at`, [guildId, since]);
 }
 
-// Remove registos antigos de histórico de membros para a BD não crescer sem limite
+// Disponível para limpeza manual (não é chamada automaticamente: apagar
+// histórico é uma política que tem de ser decidida pelo administrador)
 function pruneMemberHistory(days = 90) {
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
   return runSql('DELETE FROM member_history WHERE recorded_at < ?', [since]);

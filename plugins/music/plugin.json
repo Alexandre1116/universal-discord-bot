@@ -3,5 +3,5 @@
   "displayName": "Música (DisTube)",
   "version": "1.0.0",
   "author": "Universal Discord Bot",
-  "description": "Reproduz música de YouTube, Spotify e SoundCloud em canais de voz com comandos slash."
+  "description": "Reproduz música do YouTube em canais de voz com comandos slash (Spotify/SoundCloud exigem extratores adicionais)."
 }

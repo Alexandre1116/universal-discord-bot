@@ -78,6 +78,9 @@ function generateRandomPassword(length = 12) {
   return pass;
 }
 
+let lastGoodConfig = null; // última leitura bem-sucedida (evita escrever predefinições por cima)
+let readFailed = false;
+
 function getConfig() {
   try {
     let currentConfig = { ...defaultConfig };
@@ -89,6 +92,7 @@ function getConfig() {
       console.log(`👤 Username: ${currentConfig.webAuth.username}`);
       console.log(`🔑 Password: ${currentConfig.webAuth.password}`);
       console.log('==================================================');
+      lastGoodConfig = currentConfig;
       return currentConfig;
     }
     const data = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -104,9 +108,18 @@ function getConfig() {
       console.log(`🔑 Password: ${currentConfig.webAuth.password}`);
       console.log('==================================================');
     }
+    readFailed = false;
+    lastGoodConfig = currentConfig;
     return currentConfig;
   } catch (error) {
-    console.error('Erro ao ler config.json:', error);
+    // Um config.json corrompido não pode fazer as alterações seguintes gravarem
+    // as predefinições (token vazio, sem webAuth) por cima do ficheiro real
+    readFailed = true;
+    console.error('Erro ao ler config.json:', error.message);
+    if (lastGoodConfig) {
+      console.error('[CONFIG] A usar a última configuração conhecida em memória.');
+      return lastGoodConfig;
+    }
     return defaultConfig;
   }
 }
@@ -126,6 +139,10 @@ function saveConfig(newConfig) {
 }
 
 function updateConfig(updates) {
+  if (readFailed && !lastGoodConfig) {
+    console.error('[CONFIG] config.json ilegível e sem cópia em memória: nenhuma alteração gravada (evita apagar a configuração).');
+    return null;
+  }
   const current = getConfig();
   const merged = { ...current, ...updates };
   if (!saveConfig(merged)) {
