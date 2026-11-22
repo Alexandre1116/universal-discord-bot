@@ -1,9 +1,39 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 const { getConfig } = require('../../src/utils/config');
 const { createTicket, closeTicket, getUserOpenTicket } = require('../../src/utils/database');
 
 function init(client) {
   console.log('[TICKETS] Plugin inicializado.');
+}
+
+// Envia a transcrição do ticket para o canal de logs configurado
+async function sendTranscript(guild, channel, ticketsConfig) {
+  if (!ticketsConfig.logChannelId) return;
+
+  const logChannel = guild.channels.cache.get(ticketsConfig.logChannelId) ||
+    await guild.channels.fetch(ticketsConfig.logChannelId).catch(() => null);
+  if (!logChannel || !logChannel.isTextBased()) return;
+
+  try {
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const lines = [...messages.values()]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map(m => `[${m.createdAt.toISOString()}] ${m.author?.tag ?? 'desconhecido'}: ${m.content || '*sem texto*'}`);
+
+    const text = lines.join('\n') || 'Ticket sem mensagens.';
+    const attachment = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `${channel.name}-transcript.txt` });
+
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle('🎫 Ticket Fechado')
+      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens).`)
+      .setFooter({ text: `Fechado por ${guild.client?.user?.tag ?? 'bot'}` })
+      .setTimestamp();
+
+    await logChannel.send({ embeds: [embed], files: [attachment] });
+  } catch (err) {
+    console.error('[TICKETS] Erro ao enviar transcrição:', err.message);
+  }
 }
 
 const commands = [
@@ -51,6 +81,9 @@ const events = {
         closeTicket(interaction.channel.id);
         await interaction.reply('🔒 A fechar este ticket em 5 segundos...');
 
+        const ticketsCfg = config.tickets || {};
+        await sendTranscript(interaction.guild, interaction.channel, ticketsCfg);
+
         setTimeout(async () => {
           try {
             await interaction.channel.delete();
@@ -60,7 +93,11 @@ const events = {
         }, 5000);
       } catch (err) {
         console.error('[TICKETS] Erro ao fechar ticket:', err.message);
-        await interaction.reply({ content: 'Erro ao fechar ticket.', ephemeral: true });
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: 'Erro ao fechar ticket.', ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.reply({ content: 'Erro ao fechar ticket.', ephemeral: true }).catch(() => {});
+        }
       }
     }
 

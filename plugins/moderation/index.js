@@ -9,10 +9,6 @@ const configPath = path.join(__dirname, '..', '..', 'src', 'utils', 'config');
 const { addWarning, getWarnings, clearWarnings } = require(databasePath);
 const { getConfig } = require(configPath);
 
-const spamTracker = new Map();
-const SPAM_WINDOW = 5000;
-const SPAM_THRESHOLD = 5;
-
 // Comandos
 const commands = [
   new SlashCommandBuilder()
@@ -61,6 +57,12 @@ const commands = [
     .setDescription('Limpa todos os avisos de um utilizador.')
     .addUserOption(o => o.setName('utilizador').setDescription('O membro').setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Apaga mensagens recentes do canal.')
+    .addIntegerOption(o => o.setName('quantidade').setDescription('Mensagens a apagar (1-100)').setRequired(true).setMinValue(1).setMaxValue(100))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 ];
 
 // Funções de Handling
@@ -238,7 +240,38 @@ async function handleClearWarnings(interaction) {
   await interaction.reply({ content: `✅ Todos os avisos de **${target.tag}** foram limpos.` });
 }
 
+async function handleClear(interaction) {
+  const amount = interaction.options.getInteger('quantidade');
+
+  if (!interaction.channel || typeof interaction.channel.bulkDelete !== 'function') {
+    return interaction.reply({ content: '❌ Este canal não permite apagar mensagens em massa.', ephemeral: true });
+  }
+
+  try {
+    const deleted = await interaction.channel.bulkDelete(amount, true);
+    await interaction.reply({ content: `🧹 ${deleted.size} mensagem(ns) apagada(s).`, ephemeral: true });
+
+    if (deleted.size > 0) {
+      const embed = new EmbedBuilder()
+        .setTitle('🧹 Mensagens Apagadas')
+        .setColor('#FFA500')
+        .addFields(
+          { name: 'Moderador', value: interaction.user.tag, inline: true },
+          { name: 'Canal', value: `#${interaction.channel.name}`, inline: true },
+          { name: 'Quantidade', value: `${deleted.size} (pedido: ${amount})` }
+        )
+        .setTimestamp();
+      await sendAuditLog(interaction.guild, embed);
+    }
+  } catch (err) {
+    await interaction.reply({ content: `❌ Erro ao apagar mensagens: ${err.message}`, ephemeral: true });
+  }
+}
+
 // Eventos
+// NOTA: a auto-moderação (anti-spam, anti-links, caps, palavras proibidas)
+// pertence ao plugin "auto-mod". Não é duplicada aqui de propósito, senão as
+// mensagens seriam apagadas/punidas duas vezes.
 const events = {
   interactionCreate: async (client, interaction) => {
     if (!interaction.isChatInputCommand()) return;
@@ -251,86 +284,10 @@ const events = {
       case 'warn': await handleWarn(interaction); break;
       case 'warnings': await handleWarnings(interaction); break;
       case 'clearwarnings': await handleClearWarnings(interaction); break;
-    }
-  },
-  
-  messageCreate: async (client, message) => {
-    if (message.author.bot || !message.guild) return;
-    const config = getConfig();
-    const modConfig = config.moderation || {};
-    if (modConfig.enabled) {
-      await handleAutoMod(message, modConfig);
+      case 'clear': await handleClear(interaction); break;
     }
   }
 };
-
-async function handleAutoMod(message, modConfig) {
-  const content = message.content.toLowerCase();
-  const member = message.member;
-
-  if (member && member.permissions.has('ManageMessages')) return false;
-
-  if (modConfig.bannedWords && modConfig.bannedWords.length > 0) {
-    const banned = modConfig.bannedWords.some(word => content.includes(word.toLowerCase()));
-    if (banned) {
-      try {
-        await message.delete();
-        await message.channel.send({ content: `⚠️ ${message.author}, a tua mensagem continha palavras proibidas e foi removida.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-        return true;
-      } catch (err) {}
-    }
-  }
-
-  if (modConfig.antiLinks) {
-    const linkRegex = /(https?:\/\/[^\s]+)|(discord\.gg\/[^\s]+)/gi;
-    if (linkRegex.test(message.content)) {
-      const allowedChannels = modConfig.linkAllowedChannels || [];
-      if (!allowedChannels.includes(message.channel.id)) {
-        try {
-          await message.delete();
-          await message.channel.send({ content: `⚠️ ${message.author}, links não são permitidos neste canal.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-          return true;
-        } catch (err) {}
-      }
-    }
-  }
-
-  if (modConfig.antiSpam) {
-    const userId = message.author.id;
-    const now = Date.now();
-    if (!spamTracker.has(userId)) spamTracker.set(userId, []);
-    const timestamps = spamTracker.get(userId);
-    timestamps.push(now);
-    const recent = timestamps.filter(t => now - t < SPAM_WINDOW);
-    spamTracker.set(userId, recent);
-
-    if (recent.length >= SPAM_THRESHOLD) {
-      try {
-        await message.delete();
-        if (member && member.moderatable) {
-          await member.timeout(60 * 1000, 'Anti-spam');
-        }
-        await message.channel.send({ content: `⚠️ ${message.author}, foste temporariamente silenciado por spam.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-        spamTracker.delete(userId);
-        return true;
-      } catch (err) {}
-    }
-  }
-
-  if (modConfig.antiCaps && message.content.length > 10) {
-    const upperCount = (message.content.match(/[A-Z]/g) || []).length;
-    const ratio = upperCount / message.content.length;
-    if (ratio > 0.7) {
-      try {
-        await message.delete();
-        await message.channel.send({ content: `⚠️ ${message.author}, evita usar caps lock excessivo.` }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-        return true;
-      } catch (err) {}
-    }
-  }
-
-  return false;
-}
 
 module.exports = {
   commands,

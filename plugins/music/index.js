@@ -2,43 +2,71 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const DisTube = require('distube');
 
 let distube = null;
+let musicInitError = null;
 
 function init(client) {
-  distube = new DisTube.DisTube(client, {
-    emitNewSongOnly: true,
-    leaveOnFinish: true,
-    leaveOnStop: true,
-    emitAddListWhenCreatingQueue: false
-  });
+  try {
+    // No DisTube v5 os extratores são plugins separados; sem eles o /play
+    // não consegue resolver nada (YouTube, pesquisa por texto, etc.).
+    const plugins = [];
+    try {
+      const { YouTubePlugin } = require('@distube/youtube');
+      plugins.push(new YouTubePlugin());
+      console.log('[MUSIC] Plugin de extração YouTube carregado.');
+    } catch (err) {
+      console.error('[MUSIC] @distube/youtube não está instalado — o /play não vai conseguir resolver músicas:', err.message);
+    }
 
-  distube
-    .on('playSong', (queue, song) => {
-      const embed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setTitle('🎵 A Tocar')
-        .setDescription(`**[${song.name}](${song.url})**\nDuração: \`${song.formattedDuration}\`\nPedido por: ${song.member}`)
-        .setThumbnail(song.thumbnail)
-        .setTimestamp();
-      queue.textChannel?.send({ embeds: [embed] }).catch(() => {});
-    })
-    .on('addSong', (queue, song) => {
-      queue.textChannel?.send(`✅ Adicionado à fila: **${song.name}** (\`${song.formattedDuration}\`)`).catch(() => {});
-    })
-    .on('playSongList', (queue, playlist) => {
-      queue.textChannel?.send(`✅ Playlist adicionada: **${playlist.name}** com ${playlist.songs.length} músicas.`).catch(() => {});
-    })
-    .on('finish', (queue) => {
-      queue.textChannel?.send('🏁 Fila terminada. A sair do canal de voz.').catch(() => {});
-    })
-    .on('empty', (queue) => {
-      queue.textChannel?.send('💤 Ninguém no canal de voz. A sair...').catch(() => {});
-    })
-    .on('error', (channel, error) => {
-      console.error('[MUSIC] Erro DisTube:', error.message);
-      channel?.textChannel?.send(`❌ Erro: ${error.message.slice(0, 200)}`).catch(() => {});
+    distube = new DisTube.DisTube(client, {
+      emitNewSongOnly: true,
+      emitAddSongWhenCreatingQueue: false,
+      emitAddListWhenCreatingQueue: false,
+      savePreviousSongs: true,
+      joinNewVoiceChannel: false,
+      plugins
     });
 
-  console.log('[MUSIC] DisTube inicializado.');
+    distube
+      .on('playSong', (queue, song) => {
+        const embed = new EmbedBuilder()
+          .setColor('#5865F2')
+          .setTitle('🎵 A Tocar')
+          .setDescription(`**[${song.name}](${song.url})**\nDuração: \`${song.formattedDuration}\`\nPedido por: ${song.member}`)
+          .setThumbnail(song.thumbnail || null)
+          .setTimestamp();
+        queue.textChannel?.send({ embeds: [embed] }).catch(() => {});
+      })
+      .on('addSong', (queue, song) => {
+        queue.textChannel?.send(`✅ Adicionado à fila: **${song.name}** (\`${song.formattedDuration}\`)`).catch(() => {});
+      })
+      .on('addList', (queue, playlist) => {
+        queue.textChannel?.send(`✅ Playlist adicionada: **${playlist.name}** com ${playlist.songs.length} músicas.`).catch(() => {});
+      })
+      .on('finish', (queue) => {
+        queue.textChannel?.send('🏁 Fila terminada. A sair do canal de voz.').catch(() => {});
+      })
+      .on('empty', (queue) => {
+        queue.textChannel?.send('💤 Ninguém no canal de voz. A sair...').catch(() => {});
+      })
+      .on('disconnect', (queue) => {
+        queue.textChannel?.send('🔌 Desconectado do canal de voz. Fila limpa.').catch(() => {});
+      })
+      // Assinatura do DisTube v5: (error, queue, song)
+      .on('error', (error, queue, song) => {
+        console.error('[MUSIC] Erro DisTube:', error?.message);
+        const channel = queue?.textChannel;
+        channel?.send(`❌ Erro na música: ${String(error?.message || error).slice(0, 200)}`).catch(() => {});
+      })
+      .on('noRelated', (queue) => {
+        queue.textChannel?.send('⚠️ Não consegui encontrar músicas relacionadas.').catch(() => {});
+      });
+
+    console.log('[MUSIC] DisTube inicializado.');
+  } catch (err) {
+    musicInitError = err.message;
+    distube = null;
+    console.error('[MUSIC] Falha ao inicializar o DisTube:', err.message);
+  }
 }
 
 const commands = [
@@ -77,35 +105,49 @@ const commands = [
     .addIntegerOption(o => o.setName('volume').setDescription('Volume 0-100').setMinValue(0).setMaxValue(100).setRequired(true))
 ];
 
+const MUSIC_COMMANDS = ['play', 'pause', 'resume', 'skip', 'stop', 'queue', 'nowplaying', 'volume'];
+
 const events = {
   interactionCreate: async (client, interaction) => {
     if (!interaction.isChatInputCommand()) return;
-
-    const musicCommands = ['play', 'pause', 'resume', 'skip', 'stop', 'queue', 'nowplaying', 'volume'];
-    if (!musicCommands.includes(interaction.commandName)) return;
+    if (!MUSIC_COMMANDS.includes(interaction.commandName)) return;
 
     if (!distube) {
-      return interaction.reply({ content: 'O sistema de música ainda não está pronto.', ephemeral: true });
+      return interaction.reply({
+        content: `O sistema de música não está disponível${musicInitError ? `: ${musicInitError}`.slice(0, 180) : '. Tenta reiniciar o bot.'}`,
+        ephemeral: true
+      });
     }
 
-    const { EmbedBuilder } = require('discord.js');
+    if (!interaction.inGuild()) {
+      return interaction.reply({ content: 'A música só funciona em servidores.', ephemeral: true });
+    }
+
     const member = interaction.member;
 
     if (interaction.commandName === 'play') {
-      if (!member.voice?.channel) {
+      const voiceChannel = member?.voice?.channel;
+      if (!voiceChannel) {
         return interaction.reply({ content: 'Precisas de estar num canal de voz para usar este comando.', ephemeral: true });
       }
 
+      const me = interaction.guild.members.me;
+      const permissions = voiceChannel.permissionsFor(me);
+      if (!permissions?.has(['Connect', 'Speak'])) {
+        return interaction.reply({ content: 'Não tenho permissão para falar nesse canal de voz.', ephemeral: true });
+      }
+
       const query = interaction.options.getString('query');
+      await interaction.deferReply();
       try {
-        await distube.play(member.voice.channel, query, {
+        await distube.play(voiceChannel, query, {
           member,
           textChannel: interaction.channel
         });
-        await interaction.reply({ content: `🔍 A procurar: \`${query}\`...`, ephemeral: true });
+        await interaction.editReply(`🔍 A procurar: \`${query.slice(0, 100)}\`...`);
       } catch (err) {
         console.error('[MUSIC] Erro play:', err.message);
-        await interaction.reply({ content: `Erro: ${err.message.slice(0, 200)}`, ephemeral: true });
+        await interaction.editReply(`❌ Não consegui tocar isso: ${String(err.message).slice(0, 180)}`);
       }
       return;
     }
@@ -117,11 +159,13 @@ const events = {
 
     switch (interaction.commandName) {
       case 'pause':
+        if (queue.paused) return interaction.reply({ content: 'A música já está pausada.', ephemeral: true });
         queue.pause();
         await interaction.reply('⏸️ Música pausada.');
         break;
 
       case 'resume':
+        if (!queue.paused) return interaction.reply({ content: 'A música não está pausada.', ephemeral: true });
         queue.resume();
         await interaction.reply('▶️ Música retomada.');
         break;
@@ -155,15 +199,16 @@ const events = {
 
       case 'nowplaying': {
         const song = queue.songs[0];
+        if (!song) return interaction.reply({ content: 'Não há nada a tocar de momento.', ephemeral: true });
         const embed = new EmbedBuilder()
           .setColor('#57F287')
           .setTitle('🎵 A Tocar Agora')
           .setDescription(`**[${song.name}](${song.url})**`)
           .addFields(
             { name: 'Duração', value: `\`${song.formattedDuration}\``, inline: true },
-            { name: 'Pedido por', value: song.member.toString(), inline: true }
+            { name: 'Pedido por', value: `${song.member}`, inline: true }
           )
-          .setThumbnail(song.thumbnail)
+          .setThumbnail(song.thumbnail || null)
           .setTimestamp();
         await interaction.reply({ embeds: [embed] });
         break;

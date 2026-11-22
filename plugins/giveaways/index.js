@@ -8,11 +8,28 @@ function init(client) {
   setInterval(() => checkActiveGiveaways(client), 15000);
 }
 
+// As datas podem vir em ISO 8601 (com 'Z') ou no formato de texto do SQLite
+// ('YYYY-MM-DD HH:MM:SS', sem fuso). Juntar sempre 'Z' rebentava o parse (NaN),
+// por isso só acrescentamos o fuso quando ele não existe.
+function toDate(value) {
+  if (!value) return null;
+  let str = String(value).trim();
+  if (!/[zZ]$/.test(str) && !/[+-]\d{2}:?\d{2}$/.test(str)) str += 'Z';
+  str = str.replace(' ', 'T');
+  const date = new Date(str);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function checkActiveGiveaways(client) {
   const active = getActiveGiveaways();
   for (const gw of active) {
-    const endsAt = new Date(gw.ends_at + 'Z').getTime();
-    if (Date.now() >= endsAt) {
+    const endsAt = toDate(gw.ends_at);
+    if (!endsAt) {
+      console.warn(`[GIVEAWAYS] Data de término inválida no sorteio ${gw.id}: ${gw.ends_at}`);
+      endGiveaway(gw.id);
+      continue;
+    }
+    if (Date.now() >= endsAt.getTime()) {
       await finishGiveaway(client, gw);
     }
   }
@@ -26,7 +43,7 @@ async function finishGiveaway(client, gw) {
 
     if (participantIds.length === 0) {
       const channel = await client.channels.fetch(gw.channel_id).catch(() => null);
-      if (channel) {
+      if (channel && channel.isTextBased()) {
         await channel.send({ content: `🎁 O sorteio de **${gw.prize}** terminou sem participantes.` });
       }
       endGiveaway(gw.id);
@@ -40,7 +57,7 @@ async function finishGiveaway(client, gw) {
     }
 
     const channel = await client.channels.fetch(gw.channel_id).catch(() => null);
-    if (!channel) {
+    if (!channel || !channel.isTextBased()) {
       endGiveaway(gw.id);
       return;
     }
@@ -48,7 +65,8 @@ async function finishGiveaway(client, gw) {
     try {
       const msg = await channel.messages.fetch(gw.message_id).catch(() => null);
       if (msg) {
-        const embed = EmbedBuilder.from(msg.embeds[0] || new EmbedBuilder())
+        const base = msg.embeds[0] ? EmbedBuilder.from(msg.embeds[0]) : new EmbedBuilder();
+        const embed = base
           .setColor('#2D7DFF')
           .setDescription(`Sorteio terminado! 🎉\n\n**Vencedor(es):** ${winners.map(w => `<@${w}>`).join(', ')}\n**Prémio:** ${gw.prize}`);
         await msg.edit({ embeds: [embed], components: [] });
@@ -78,15 +96,19 @@ const commands = [
 const events = {
   interactionCreate: async (client, interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'giveaway') {
+      if (!interaction.inGuild()) {
+        return interaction.reply({ content: 'Os sorteios só funcionam em servidores.', ephemeral: true });
+      }
+
       const prize = interaction.options.getString('prize');
       const winnersCount = interaction.options.getInteger('winners') || 1;
       const durationMin = interaction.options.getInteger('duration');
-      const endsAt = new Date(Date.now() + durationMin * 60000).toISOString();
+      const endsAt = new Date(Date.now() + durationMin * 60000);
 
       const embed = new EmbedBuilder()
         .setColor('#FFD700')
         .setTitle('🎉 Sorteio!')
-        .setDescription(`**Prémio:** ${prize}\n**Vencedores:** ${winnersCount}\n**Termina:** <t:${Math.floor(new Date(endsAt + 'Z').getTime() / 1000)}:R>\n\nClica no botão para participar!`)
+        .setDescription(`**Prémio:** ${prize}\n**Vencedores:** ${winnersCount}\n**Termina:** <t:${Math.floor(endsAt.getTime() / 1000)}:R>\n\nClica no botão para participar!`)
         .setFooter({ text: `Organizado por ${interaction.user.tag}` })
         .setTimestamp();
 
@@ -101,23 +123,25 @@ const events = {
 
       const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
 
-      createGiveaway(interaction.guild.id, interaction.channel.id, msg.id, prize, winnersCount, interaction.user.id, endsAt);
+      createGiveaway(interaction.guild.id, interaction.channel.id, msg.id, prize, winnersCount, interaction.user.id, endsAt.toISOString());
       console.log(`[GIVEAWAYS] Sorteio criado: ${prize} por ${interaction.user.tag}`);
     }
 
     if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
       const giveaway = getGiveawayByMessage(interaction.message.id);
-      if (!giveaway) {
+      if (!giveaway || giveaway.ended) {
         return interaction.reply({ content: 'Este sorteio já não está ativo.', ephemeral: true });
       }
 
-      if (new Date(giveaway.ends_at + 'Z').getTime() < Date.now()) {
+      const endsAt = toDate(giveaway.ends_at);
+      if (!endsAt || endsAt.getTime() < Date.now()) {
         return interaction.reply({ content: 'Este sorteio já terminou.', ephemeral: true });
       }
 
       const entered = enterGiveaway(giveaway.id, interaction.user.id);
+      const entries = getGiveawayEntries(giveaway.id).length;
       if (entered) {
-        await interaction.reply({ content: '✅ Estás inscrito no sorteio!', ephemeral: true });
+        await interaction.reply({ content: `✅ Estás inscrito no sorteio! (${entries} participante(s))`, ephemeral: true });
       } else {
         await interaction.reply({ content: '⚠️ Já participas neste sorteio.', ephemeral: true });
       }
