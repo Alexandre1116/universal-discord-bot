@@ -118,13 +118,19 @@ const events = {
       await cleanupDepartedTempChannel(newState.guild || oldState.guild, oldState.channelId);
     }
 
-    // 2) Entrou num hub → criar canal temporário
+    // 2) Entrou num hub → criar canal temporário. Só conta uma mudança real de
+    // canal: eventos de mute/deafen têm o mesmo channelId e criavam canais a mais.
     const hub = voiceHubs.find(h => h.channelId === newState.channelId);
-    if (hub) {
+    if (hub && oldState.channelId !== newState.channelId) {
       try {
         const guild = newState.guild;
         const member = newState.member;
         if (!member) return;
+
+        // O membro pode ter saído/trocado de canal enquanto a limpeza acima
+        // esperava pelo Discord
+        const liveChannelId = guild.members.cache.get(member.id)?.voice?.channelId ?? member.voice?.channelId;
+        if (liveChannelId !== hub.channelId) return;
 
         const sourceChannel = guild.channels.cache.get(hub.channelId);
         const pattern = hub.namePattern || '🔊 {user}';
@@ -157,6 +163,13 @@ const events = {
             ManageChannels: true,
             MoveMembers: true
           });
+          // Última verificação: se o membro já não está no hub, não o movemos
+          // para um canal que ele já não pediu
+          const stillInHub = (guild.members.cache.get(member.id)?.voice?.channelId ?? member.voice?.channelId) === hub.channelId;
+          if (!stillInHub) {
+            console.log('[VOICE HUBS] Membro já não está no hub; canal temporário deixado para o cleanup.');
+            return;
+          }
           await member.voice.setChannel(tempChannel);
         } catch (stepErr) {
           console.error('[VOICE HUBS] Falha ao configurar/mover para o canal temporário:', stepErr.message);

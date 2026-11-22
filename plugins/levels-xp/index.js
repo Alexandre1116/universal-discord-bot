@@ -110,8 +110,8 @@ async function awardXp(client, guild, userId, amount, levelsConfig, fromVoice = 
 function stopVoiceTimer(guildId, userId) {
   const guildTimers = voiceTimers.get(guildId);
   if (!guildTimers) return;
-  const timer = guildTimers.get(userId);
-  if (timer) clearInterval(timer);
+  const entry = guildTimers.get(userId);
+  if (entry) clearInterval(entry.timer);
   guildTimers.delete(userId);
   if (guildTimers.size === 0) voiceTimers.delete(guildId);
 }
@@ -121,7 +121,11 @@ function startVoiceTimer(client, guild, userId, levelsConfig) {
 
   if (!voiceTimers.has(guild.id)) voiceTimers.set(guild.id, new Map());
   const guildTimers = voiceTimers.get(guild.id);
-  if (guildTimers.has(userId)) return;
+  const existing = guildTimers.get(userId);
+  // Guarda a cadência usada: mudar o intervalo na UI tem de valer para quem já
+  // está em canal de voz, não só para as próximas sessões
+  if (existing && existing.intervalSeconds === intervalSeconds) return;
+  if (existing) clearInterval(existing.timer);
 
   const timer = setInterval(async () => {
     try {
@@ -146,13 +150,13 @@ function startVoiceTimer(client, guild, userId, levelsConfig) {
     }
   }, intervalSeconds * 1000);
 
-  guildTimers.set(userId, timer);
+  guildTimers.set(userId, { timer, intervalSeconds });
 }
 
 // Quem já estava em canal de voz quando o bot ligou também ganha XP
 function stopAllVoiceTimers() {
   for (const [guildId, timers] of voiceTimers.entries()) {
-    for (const timer of timers.values()) clearInterval(timer);
+    for (const entry of timers.values()) clearInterval(entry.timer);
     timers.clear();
     voiceTimers.delete(guildId);
   }
@@ -182,9 +186,9 @@ function reconcileVoiceSessions(client, levelsConfig) {
   for (const [guildId, timers] of voiceTimers.entries()) {
     if (!client.guilds.cache.has(guildId)) continue;
     const present = inVoice.get(guildId) || new Set();
-    for (const [memberId, timer] of [...timers.entries()]) {
+    for (const [memberId, entry] of [...timers.entries()]) {
       if (present.has(memberId)) continue;
-      clearInterval(timer);
+      clearInterval(entry.timer);
       timers.delete(memberId);
     }
   }
@@ -236,7 +240,7 @@ const events = {
     // para sempre com o servidor em closure
     const timers = voiceTimers.get(guild.id);
     if (timers) {
-      for (const timer of timers.values()) clearInterval(timer);
+      for (const entry of timers.values()) clearInterval(entry.timer);
       timers.clear();
     }
     voiceTimers.delete(guild.id);

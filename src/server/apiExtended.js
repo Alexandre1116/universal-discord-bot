@@ -399,10 +399,13 @@ router.get('/backup', (req, res) => {
 router.post('/restore', (req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const { shutdownDb } = require('../utils/database');
+  const { shutdownDb, abortShutdown, validateDbBuffer } = require('../utils/database');
   const { saveConfig } = require('../utils/config');
   const DATA_DIR = path.join(__dirname, '../../data');
   const DB_PATH = path.join(DATA_DIR, 'data.db');
+
+  const badRequest = message => Object.assign(new Error(message), { status: 400 });
+  const ioError = message => Object.assign(new Error(message), { status: 500 });
 
   try {
     const { config, database } = req.body;
@@ -414,24 +417,29 @@ router.post('/restore', (req, res) => {
       try {
         parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
       } catch (err) {
-        throw new Error(`Backup inválido: "config" não é JSON (${err.message}).`);
+        throw badRequest(`Backup inválido: "config" não é JSON (${err.message}).`);
       }
       if (typeof parsedConfig !== 'object' || parsedConfig === null || Array.isArray(parsedConfig)) {
-        throw new Error('Backup inválido: "config" tem de ser um objeto JSON.');
+        throw badRequest('Backup inválido: "config" tem de ser um objeto JSON.');
       }
+      // o anexo do backup automático do Discord traz uma nota informativa que
+      // não pertence ao config
+      delete parsedConfig._backupNota;
     }
 
     let dbBuffer = null;
     if (database) {
       dbBuffer = Buffer.from(String(database), 'base64');
-      if (dbBuffer.length === 0) throw new Error('Backup inválido: a base de dados está vazia.');
+      if (dbBuffer.length === 0) throw badRequest('Backup inválido: a base de dados está vazia.');
       if (dbBuffer.subarray(0, 15).toString('utf8') !== 'SQLite format 3') {
-        throw new Error('Backup inválido: a base de dados não é um ficheiro SQLite válido.');
+        throw badRequest('Backup inválido: a base de dados não é um ficheiro SQLite válido.');
       }
+      const check = validateDbBuffer(dbBuffer);
+      if (!check.ok) throw badRequest(`Backup inválido: ${check.error}`);
     }
 
     if (!parsedConfig && !dbBuffer) {
-      return res.status(400).json({ success: false, error: 'Backup sem "config" nem "database" para restaurar.' });
+      throw badRequest('Backup sem "config" nem "database" para restaurar.');
     }
 
     // 2) O backup automático do Discord vem SEM segredos (token, credenciais do
@@ -448,19 +456,33 @@ router.post('/restore', (req, res) => {
     // (falhar aqui não altera nada); depois o config; por fim fechamos a BD e
     // fazemos rename — assim não fica config novo com BD antiga/fechada.
     const tmpDb = `${DB_PATH}.restore`;
-    if (dbBuffer) fs.writeFileSync(tmpDb, dbBuffer);
+    if (dbBuffer) {
+      try {
+        fs.writeFileSync(tmpDb, dbBuffer);
+      } catch (err) {
+        throw ioError(`Falha ao preparar a base de dados restaurada: ${err.message}`);
+      }
+    }
 
+    let dbStopped = false;
     try {
       if (parsedConfig && !saveConfig(parsedConfig)) {
-        throw new Error('Falha ao gravar o config restaurado em disco.');
+        throw ioError('Falha ao gravar o config restaurado em disco.');
       }
-
       if (dbBuffer) {
         shutdownDb();
+        dbStopped = true;
         fs.renameSync(tmpDb, DB_PATH);
       }
+    } catch (err) {
+      // Se já paramos as gravações, há que as reativar: sem isto o processo
+      // continuava vivo a aceitar operações sem gravar nada em disco
+      if (dbStopped) abortShutdown();
+      throw err instanceof Error && err.status ? err : ioError(`Falha ao aplicar o restauro: ${err.message}`);
     } finally {
-      if (dbBuffer && fs.existsSync(tmpDb)) fs.unlinkSync(tmpDb);
+      if (dbBuffer && fs.existsSync(tmpDb)) {
+        try { fs.unlinkSync(tmpDb); } catch (err) { /* não é crítico */ }
+      }
     }
 
     res.json({ success: true, message: 'Restauro concluído! A reiniciar o sistema...' });
@@ -471,7 +493,8 @@ router.post('/restore', (req, res) => {
     }, 2000);
 
   } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+    const status = error && error.status ? error.status : 400;
+    res.status(status).json({ success: false, error: error.message });
   }
 });
 

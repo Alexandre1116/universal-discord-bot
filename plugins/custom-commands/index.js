@@ -44,8 +44,8 @@ const events = {
 
       const matchType = cmd.matchType || 'exact';
       // Em regex usa-se o padrão TAL COMO foi gravado (remover o prefixo
-      // corrompia padrões como ".*promo"). NOTA: o padrão é testado sobre o
-      // conteúdo JÁ SEM o prefixo "!" — escrever "^help", não "^!help".
+      // corrompia padrões como ".*promo"). O padrão é aplicado à mensagem
+      // inteira, incluindo o "!": escreve-se "^!promo", não "^promo".
       const rawTrigger = String(cmd.trigger).trim();
       const trigger = matchType === 'regex' ? rawTrigger : normalizeTrigger(rawTrigger);
       if (!trigger) continue;
@@ -53,7 +53,9 @@ const events = {
       let matched = false;
       try {
         if (matchType === 'regex') {
-          matched = new RegExp(trigger, 'i').test(contentWithoutPrefix);
+          // O padrão é aplicado à MENSAGEM INTEIRA (com o "!"), para padrões
+          // escritos como "^!promo" continuarem a fazer sentido
+          matched = new RegExp(trigger, 'i').test(content);
         } else if (matchType === 'startsWith') {
           matched = contentWithoutPrefix.toLowerCase().startsWith(trigger.toLowerCase());
         } else {

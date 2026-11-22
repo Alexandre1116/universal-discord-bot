@@ -6,7 +6,7 @@ function init(client) {
   console.log('[TICKETS] Plugin inicializado.');
 }
 
-// Recolhe as mensagens do ticket (até ~500, paginadas) e envia a transcrição
+// Recolhe as mensagens do ticket (até ~1000, paginadas) e envia a transcrição
 // para o canal de logs configurado.
 // Devolve true (enviado), false (configurado mas falhou) ou null (não configurado).
 async function sendTranscript(guild, channel, ticketsConfig, closedBy) {
@@ -23,7 +23,7 @@ async function sendTranscript(guild, channel, ticketsConfig, closedBy) {
     // Paginação: o fetch do Discord devolve no máximo 100 por pedido
     const collected = new Map();
     let before = undefined;
-    for (let page = 0; page < 5; page++) {
+    for (let page = 0; page < 10; page++) {
       const batch = await channel.messages.fetch(before ? { limit: 100, before } : { limit: 100 });
       if (batch.size === 0) break;
       for (const m of batch.values()) collected.set(m.id, m);
@@ -47,7 +47,7 @@ async function sendTranscript(guild, channel, ticketsConfig, closedBy) {
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
       .setTitle('🎫 Ticket Fechado')
-      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens${collected.size >= 500 ? ', limite de 500 atingido' : ''}).`)
+      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens${collected.size >= 1000 ? ', limite de 1000 atingido' : ''}).`)
       .setFooter({ text: `Fechado por ${closedBy?.tag ?? 'desconhecido'}` })
       .setTimestamp();
 
@@ -130,23 +130,31 @@ const events = {
       let closingHeldByTimeout = false;
 
       try {
-        await interaction.reply('🔒 A fechar este ticket em 5 segundos...');
+        await interaction.deferReply();
 
         // 1) Transcrição primeiro: se falhar, nada é alterado (canal e registo
-        // ficam abertos para uma nova tentativa)
+        // ficam abertos para uma nova tentativa). A resposta pública só sai depois
+        // de a transcrição estar garantida — "a fechar em 5 segundos" antes disso
+        // ficava a mentir quando a transcrição falhava.
         const transcript = await sendTranscript(interaction.guild, interaction.channel, ticketsConfig, interaction.user);
         if (transcript === false) {
-          await interaction.followUp({
-            content: '⚠️ Não consegui enviar a transcrição para o canal de logs. O ticket **não foi fechado** para não perder o conteúdo — corrige o canal de logs e volta a tentar.',
-            ephemeral: true
+          await interaction.editReply({
+            content: '⚠️ Não consegui enviar a transcrição para o canal de logs. O ticket **não foi fechado** para não perder o conteúdo — corrige o canal de logs e volta a tentar.'
           });
           return;
         }
 
         // 2) Só depois marca fechado na BD
-        closeTicket(channelId);
+        if (!closeTicket(channelId)) {
+          await interaction.editReply({
+            content: '⚠️ A transcrição foi enviada, mas a base de dados não registou o fecho. O canal **não foi apagado** — volta a tentar.'
+          });
+          return;
+        }
 
         closingHeldByTimeout = true;
+        await interaction.editReply('🔒 A fechar este ticket em 5 segundos...');
+
         setTimeout(async () => {
           try {
             await interaction.channel.delete();
@@ -174,7 +182,14 @@ const events = {
 
       const existing = getUserOpenTicket(interaction.guild.id, interaction.user.id);
       if (existing) {
-        return interaction.reply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.', ephemeral: true });
+        // Se o canal foi apagado à mão, o registo ficava "open" para sempre e o
+        // utilizador nunca mais conseguia abrir um ticket
+        const existingChannel = await interaction.guild.channels.fetch(existing.channel_id).catch(() => null);
+        if (!existingChannel) {
+          closeTicket(existing.channel_id);
+        } else {
+          return interaction.reply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.', ephemeral: true });
+        }
       }
 
       try {

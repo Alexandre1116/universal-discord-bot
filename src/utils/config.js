@@ -97,6 +97,12 @@ function getConfig() {
     }
     const data = fs.readFileSync(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(data);
+    // Um JSON válido mas com a raiz errada (array, string, número) não pode ser
+    // tratado como config: acabaria por gravar predefinições (e uma password nova)
+    // por cima do ficheiro real
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('config.json não contém um objeto JSON válido.');
+    }
     currentConfig = { ...defaultConfig, ...parsed };
 
     if (!currentConfig.webAuth) {

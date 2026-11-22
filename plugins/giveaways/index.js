@@ -57,7 +57,10 @@ async function finishGiveaway(client, gw) {
 
     if (participantIds.length === 0) {
       // Encerra e persiste antes de anunciar (sem vencedores)
-      if (!endGiveaway(gw.id, [])) console.error(`[GIVEAWAYS] Falha ao gravar encerramento do sorteio ${gw.id}`);
+      if (!endGiveaway(gw.id, [])) {
+        console.error(`[GIVEAWAYS] Falha ao gravar o encerramento do sorteio ${gw.id}; nada anunciado, nova tentativa na próxima ronda.`);
+        return;
+      }
       const channel = await client.channels.fetch(gw.channel_id).catch(() => null);
       if (channel && channel.isTextBased()) {
         await channel.send({ content: `🎁 O sorteio de **${gw.prize}** terminou sem participantes.` });
@@ -72,9 +75,12 @@ async function finishGiveaway(client, gw) {
     }
 
     // Persiste vencedores + encerramento JUNTOS, antes de publicar: se o anúncio
-    // falhar ou o processo cair, o resultado fica recuperável em BD
+    // falhar ou o processo cair, o resultado fica recuperável em BD.
+    // Se a gravação falhar NÃO anunciamos: anunciar com ended=0 faria o sorteio
+    // ser re-sortiado e re-anunciado a cada 15 segundos.
     if (!endGiveaway(gw.id, winners)) {
-      console.error(`[GIVEAWAYS] Falha ao gravar os vencedores do sorteio ${gw.id}: ${winners.join(', ')}`);
+      console.error(`[GIVEAWAYS] Falha ao gravar os vencedores do sorteio ${gw.id} (${winners.join(', ')}); nada anunciado, nova tentativa na próxima ronda.`);
+      return;
     }
 
     const channel = await client.channels.fetch(gw.channel_id).catch(() => null);

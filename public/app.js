@@ -254,8 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let textOpts = '<option value="">-- Selecionar Canal --</option>';
     let voiceOpts = '<option value="">-- Selecionar Canal de Voz --</option>';
     guilds.forEach(g => {
-      if (g.textChannels.length) { textOpts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}"># ${c.name}</option>`).join('')}</optgroup>`; }
-      if (g.voiceChannels.length) { voiceOpts += `<optgroup label="${g.name}">${g.voiceChannels.map(c => `<option value="${c.id}">🔊 ${c.name}</option>`).join('')}</optgroup>`; }
+      if (g.textChannels.length) { textOpts += `<optgroup label="${escapeHtml(g.name)}">${g.textChannels.map(c => `<option value="${escapeHtml(c.id)}"># ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
+      if (g.voiceChannels.length) { voiceOpts += `<optgroup label="${escapeHtml(g.name)}">${g.voiceChannels.map(c => `<option value="${escapeHtml(c.id)}">🔊 ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
     });
     ['joinChannelSelect', 'leaveChannelSelect', 'auditChannelSelect', 'rrChannelSelect', 'embedChannelSelect', 'scheduleChannelSelect', 'ticketLogChannel', 'levelsAnnounceChannel', 'backupChannelSelect'].forEach(id => {
       const el = document.getElementById(id);
@@ -270,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function populateRoleDropdowns() {
-    const roleOpts = '<option value="">-- Cargo --</option>' + serverRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    const roleOpts = '<option value="">-- Cargo --</option>' + serverRoles.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
     const el = document.getElementById('ticketSupportRole');
     if (el) el.innerHTML = roleOpts;
   }
@@ -278,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderVoiceHubs(hubs) {
     const el = document.getElementById('voiceHubsList');
     if (!hubs.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-microphone-slash"></i><p>Nenhum hub.</p></div>'; return; }
-    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${escapeHtml(h.channelId)}</h5><p>Padrão: <code>${escapeHtml(h.namePattern)}</code> | Limite: ${h.userLimit > 0 ? escapeHtml(h.userLimit) : 'Original'}</p></div><button class="btn btn-danger btn-sm" onclick="deleteHub('${escapeHtml(h.id || h.channelId)}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${escapeHtml(h.channelId)}</h5><p>Padrão: <code>${escapeHtml(h.namePattern)}</code> | Limite: ${h.userLimit > 0 ? escapeHtml(h.userLimit) : 'Original'}</p></div><button class="btn btn-danger btn-sm" data-action="delete-hub" data-id="${escapeHtml(h.id || h.channelId)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
 
   // ========== PREVIEWS ==========
@@ -370,8 +370,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (notifySaved(r, 'Hub adicionado!')) fetchConfig();
   });
   window.deleteHub = async id => {
-    await fetch(`/api/hubs/${id}`, { method: 'DELETE' });
-    showToast('Hub removido!'); fetchConfig();
+    const res = await fetch(`/api/hubs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Hub removido!')) fetchConfig();
   };
 
   // MODERATION
@@ -480,6 +481,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // Ações dos cartões. Handlers em atributos (onclick="...") não são protegidos
+  // por escapeHtml: o browser descodifica as entidades ANTES de interpretar o
+  // JavaScript, por isso um valor com &#39; saía do literal. Os ids passam a ir
+  // em data-* e o handler é registado aqui (delegação no documento).
+  document.addEventListener('click', e => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const id = el.dataset.id;
+    switch (el.dataset.action) {
+      case 'delete-hub': window.deleteHub(id); break;
+      case 'delete-rr': window.deleteRR(id); break;
+      case 'delete-sched': window.deleteSched(id); break;
+      case 'delete-plugin': window.deletePlugin(id); break;
+    }
+  });
+  document.addEventListener('change', e => {
+    const el = e.target.closest('[data-action="toggle-plugin"]');
+    if (el) window.togglePlugin(el.dataset.id, el.checked);
+  });
+
   function injectPluginTabs(plugins) {
     const nav = document.querySelector('.nav-menu');
     const main = document.querySelector('.main-content');
@@ -504,10 +525,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const uiBase = `/api/plugins-ui/${encodeURIComponent(p.folderId)}/ui/`;
       // Caminhos relativos do tab.html resolvem contra a pasta ui/ do plugin
+      // (new URL trata corretamente de ./, ../ e nomes como .hidden.css)
       const resolveAsset = (raw) => {
         if (!raw) return raw;
         if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('/') || raw.startsWith('data:') || raw.startsWith('#')) return raw;
-        return uiBase + raw.replace(/^\.\/?/, '');
+        try {
+          return new URL(raw, `${location.origin}${uiBase}`).pathname;
+        } catch (err) {
+          return raw;
+        }
       };
 
       const btn = document.createElement('button');
@@ -533,6 +559,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const container = section.querySelector('.plugin-ui-container');
         if (container.dataset.loaded === '1') return;
+        if (container.dataset.loading === '1') return; // dois cliques rápidos não carregam/executam a aba duas vezes
+        container.dataset.loading = '1';
         try {
           const res = await fetch(`${uiBase}tab.html`);
           if (!res.ok) throw new Error(`tab.html não encontrado (HTTP ${res.status})`);
@@ -557,6 +585,8 @@ document.addEventListener('DOMContentLoaded', () => {
           container.dataset.loaded = '1';
         } catch (err) {
           container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${escapeHtml(err.message)}</p>`;
+        } finally {
+          delete container.dataset.loading;
         }
       });
     });
@@ -588,10 +618,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <label class="toggle-switch">
-              <input type="checkbox" onchange="togglePlugin('${escapeHtml(p.folderId)}', this.checked)" ${p.enabled ? 'checked' : ''}>
+              <input type="checkbox" data-action="toggle-plugin" data-id="${escapeHtml(p.folderId)}" ${p.enabled ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
-            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" onclick="deletePlugin('${escapeHtml(p.folderId)}')"><i class="fa-solid fa-trash"></i></button>`}
+            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" data-action="delete-plugin" data-id="${escapeHtml(p.folderId)}"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </div>`;
       }
@@ -607,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.deletePlugin = async (pluginId) => {
     if (!confirm('Tens a certeza que queres eliminar este plugin?')) return;
     try {
-      const res = await fetch(`/api/plugins/${pluginId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
       const r = await res.json();
       showToast(r.success ? 'Plugin eliminado com sucesso!' : r.error, !r.success);
       fetchPlugins();
@@ -744,11 +774,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderExistingRR(list) {
     const el = document.getElementById('rrExistingList');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><p>Nenhum painel.</p></div>'; return; }
-    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${escapeHtml(rr.title || 'Reaction Roles')}</h5><p>${(rr.roles || []).length} cargos | Canal: ${escapeHtml(rr.channelId)}</p></div><button class="btn btn-danger btn-sm" onclick="deleteRR('${escapeHtml(rr.id)}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${escapeHtml(rr.title || 'Reaction Roles')}</h5><p>${(rr.roles || []).length} cargos | Canal: ${escapeHtml(rr.channelId)}</p></div><button class="btn btn-danger btn-sm" data-action="delete-rr" data-id="${escapeHtml(rr.id)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
   window.deleteRR = async id => {
-    await fetch(`/api/reaction-roles/${id}`, { method: 'DELETE' });
-    showToast('Painel removido!'); fetchReactionRoles();
+    const res = await fetch(`/api/reaction-roles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Painel removido!')) fetchReactionRoles();
   };
 
   // LEVELS
@@ -830,12 +861,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/scheduled-messages/${guildId}`); const d = await r.json();
       const el = document.getElementById('scheduledList');
       if (!d.length) { el.innerHTML = '<div class="empty-state"><p>Sem agendados.</p></div>'; return; }
-      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${escapeHtml(m.content?.substring(0, 50) || 'Embed')}</h5><span>Cron: ${escapeHtml(m.cron_expression || 'One-shot')} | Canal: ${escapeHtml(m.channel_id)}</span></div><button class="btn btn-danger btn-sm" onclick="deleteSched(${Number(m.id) || 0})"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${escapeHtml(m.content?.substring(0, 50) || 'Embed')}</h5><span>Cron: ${escapeHtml(m.cron_expression || 'One-shot')} | Canal: ${escapeHtml(m.channel_id)}</span></div><button class="btn btn-danger btn-sm" data-action="delete-sched" data-id="${escapeHtml(m.id)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
     } catch (e) { console.error(e); }
   }
   window.deleteSched = async id => {
-    await fetch(`/api/scheduled-messages/${id}`, { method: 'DELETE' });
-    showToast('Removido!'); loadScheduled();
+    const res = await fetch(`/api/scheduled-messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Removido!')) loadScheduled();
   };
 
   // GIVEAWAYS
@@ -925,7 +957,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnBackup.addEventListener('click', async () => {
       try {
         const res = await fetch('/api/backup');
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.config) {
+          throw new Error(data && data.error ? data.error : `O servidor não devolveu um backup (HTTP ${res.status}).`);
+        }
         const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -971,8 +1006,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (formAutoBackup) {
     formAutoBackup.addEventListener('submit', async e => {
       e.preventDefault();
-      const r = await postJson('/api/config', { 
-        backup: { 
+      const r = await postJson('/api/config', {
+        backup: {
           autoBackup: getChecked('backupAutoEnabled'), 
           channelId: getVal('backupChannelSelect') 
         } 

@@ -4,7 +4,7 @@ const { getConfig, updateConfig, saveConfig } = require('../utils/config');
 const { client, getBotStatus, initBot } = require('../bot/client');
 const fs = require('fs');
 const path = require('path');
-const { getInstalledPlugins, installPluginFromGithub, deletePlugin, getPluginPath } = require('../utils/pluginManager');
+const { getInstalledPlugins, installPluginFromGithub, deletePlugin, getPluginPath, USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR } = require('../utils/pluginManager');
 
 const router = express.Router();
 
@@ -71,15 +71,26 @@ router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
       return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
     }
 
-    // realpath: bloqueia links simbólicos que apontem para fora da pasta ui/
-    let realUiDir, realTarget;
+    // realpath em toda a cadeia: bloqueia symlinks, incluindo a hipótese de a
+    // própria pasta ui/ (ou a do plugin) apontar para fora das raízes autorizadas
+    const realRoots = [USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR]
+      .map(root => { try { return fs.realpathSync(root); } catch (err) { return path.resolve(root); } });
+    let realBase, realUiDir, realTarget;
     try {
+      realBase = fs.realpathSync(base);
       realUiDir = fs.realpathSync(uiDir);
       realTarget = fs.realpathSync(target);
     } catch (err) {
       return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
     }
-    if (realTarget !== realUiDir && !realTarget.startsWith(realUiDir + path.sep)) {
+    const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
+    if (!realRoots.some(root => inside(realBase, root))) {
+      return res.status(403).json({ success: false, error: 'Pasta do plugin fora das raízes autorizadas.' });
+    }
+    if (!inside(realUiDir, realBase)) {
+      return res.status(403).json({ success: false, error: 'A pasta ui/ do plugin aponta para fora do plugin.' });
+    }
+    if (!inside(realTarget, realUiDir)) {
       return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
     }
     if (!fs.statSync(realTarget).isFile()) {

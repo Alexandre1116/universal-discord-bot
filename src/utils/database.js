@@ -19,6 +19,7 @@ if (fs.existsSync(OLD_DB_PATH) && !fs.existsSync(DB_PATH)) {
 let db = null;
 let initPromise = null;
 let shuttingDown = false;
+let SQLModule = null; // guardado para validar buffers sem tocar na ligação ativa
 
 async function getDb() {
   if (db) return db;
@@ -26,6 +27,7 @@ async function getDb() {
 
   initPromise = (async () => {
     const SQL = await initSqlJs();
+    SQLModule = SQL;
     let fileBuffer = null;
     if (fs.existsSync(DB_PATH)) {
       fileBuffer = fs.readFileSync(DB_PATH);
@@ -38,6 +40,31 @@ async function getDb() {
   return initPromise;
 }
 
+// Valida um binário de base de dados (ex: backup a restaurar) sem abrir mão da
+// ligação em memória. Devolve { ok, error }.
+function validateDbBuffer(buffer) {
+  if (!SQLModule) return { ok: false, error: 'Base de dados ainda não inicializada.' };
+  let probe = null;
+  try {
+    probe = new SQLModule.Database(buffer);
+    const check = probe.exec('PRAGMA integrity_check');
+    const verdict = check[0] && check[0].values[0] ? String(check[0].values[0][0]) : 'desconhecido';
+    if (verdict !== 'ok') return { ok: false, error: `Verificação de integridade falhou: ${verdict}` };
+    const tables = probe.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    const names = new Set(tables[0] ? tables[0].values.map(v => v[0]) : []);
+    for (const required of ['xp_levels', 'giveaways', 'warnings']) {
+      if (!names.has(required)) return { ok: false, error: `Backup sem a tabela obrigatória "${required}".` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    if (probe) {
+      try { probe.close(); } catch (err) { /* no-op */ }
+    }
+  }
+}
+
 function saveDb() {
   if (!db || shuttingDown) return;
   const data = db.export();
@@ -47,6 +74,12 @@ function saveDb() {
 
 function shutdownDb() {
   shuttingDown = true;
+}
+
+// Anula um shutdown: sem isto, uma operação que falhe depois de shutdownDb deixa
+// o processo "vivo" mas a gravar nada em disco, silenciosamente.
+function abortShutdown() {
+  shuttingDown = false;
 }
 
 // Auto-save a cada 30 segundos (apenas após o DB estar carregado)
@@ -102,11 +135,18 @@ function initTables() {
     created_at TEXT DEFAULT (datetime('now'))
   )`);
 
-  // Migração tolerante: bases de dados antigas não têm a coluna dos vencedores
-  try {
-    db.run('ALTER TABLE giveaways ADD COLUMN winners TEXT');
-  } catch (e) {
-    // no-op quando a coluna já existe
+  // Migração: as bases antigas não têm a coluna dos vencedores. Perguntar antes
+  // de ALTERar: engolir o erro do ALTER deixaria uma coluna em falta a passar
+  // por "já existia" (e os vencedores a desaparecer em silêncio).
+  const gwCols = db.exec("PRAGMA table_info(giveaways)");
+  const hasWinners = gwCols[0] ? gwCols[0].values.some(v => v[1] === 'winners') : false;
+  if (!hasWinners) {
+    try {
+      db.run('ALTER TABLE giveaways ADD COLUMN winners TEXT');
+      console.log('[DB] Coluna "winners" adicionada à tabela giveaways.');
+    } catch (err) {
+      console.error('[DB] Não foi possível adicionar a coluna "winners":', err.message);
+    }
   }
 
   db.run(`CREATE TABLE IF NOT EXISTS giveaway_entries (
@@ -144,6 +184,9 @@ function initTables() {
     member_count INTEGER NOT NULL,
     recorded_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  // A consulta do gráfico filtra por (guild_id, recorded_at)
+  db.run('CREATE INDEX IF NOT EXISTS idx_member_history_guild_time ON member_history(guild_id, recorded_at)');
 
   saveDb();
 }
@@ -375,11 +418,14 @@ function getMemberHistory(guildId, days = 30) {
   // limite tem de ser comparado no mesmo formato (não em ISO 8601 com 'T'/'Z')
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
   // Um ponto por dia: a ÚLTIMA amostra desse dia (o máximo do dia faria o
-  // gráfico subir sempre para o pico e esconder perdas de membros)
-  return queryAll(`SELECT DATE(recorded_at) as recorded_at, member_count FROM member_history mh
+  // gráfico subir sempre para o pico e esconder perdas de membros).
+  // NOTA de desempenho: tem de ser o IN (SELECT MAX(id) ... GROUP BY) — a versão
+  // com subquery correlacionada sobre DATE() demorou 14s (medido com sql.js) para
+  // um ano de amostras horárias de um só servidor, e o sql.js é síncrono.
+  return queryAll(`SELECT DATE(recorded_at) as recorded_at, member_count FROM member_history
     WHERE guild_id = ? AND recorded_at >= ?
-      AND id = (SELECT MAX(id) FROM member_history m2 WHERE m2.guild_id = mh.guild_id AND DATE(m2.recorded_at) = DATE(mh.recorded_at))
-    ORDER BY recorded_at`, [guildId, since]);
+      AND id IN (SELECT MAX(id) FROM member_history WHERE guild_id = ? AND recorded_at >= ? GROUP BY DATE(recorded_at))
+    ORDER BY recorded_at`, [guildId, since, guildId, since]);
 }
 
 // Disponível para limpeza manual (não é chamada automaticamente: apagar
@@ -390,7 +436,7 @@ function pruneMemberHistory(days = 90) {
 }
 
 module.exports = {
-  getDb, saveDb, shutdownDb, initTables,
+  getDb, saveDb, shutdownDb, abortShutdown, validateDbBuffer, initTables,
   addWarning, getWarnings, clearWarnings, getAllWarnings,
   addXp, addVoiceXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
   createTicket, closeTicket, getOpenTickets, getUserOpenTicket,

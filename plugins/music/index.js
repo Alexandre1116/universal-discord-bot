@@ -16,6 +16,9 @@ function leaveVoice(guildId, queue) {
     clearTimeout(pendingEmpty);
     emptyChannelTimers.delete(guildId);
   }
+  // O DisTube emite 'disconnect' de forma síncrona a partir de voice.leave(),
+  // por isso a supressão da mensagem dura apenas o tempo da chamada: guardar o
+  // id durante segundos seguintes suprimia o disconnect de uma fila nova
   selfDisconnects.add(guildId);
   try {
     if (queue?.voice) queue.voice.leave();
@@ -23,8 +26,7 @@ function leaveVoice(guildId, queue) {
   } catch (err) {
     console.error('[MUSIC] Erro ao sair do canal de voz:', err.message);
   }
-  // A flag não pode ficar para sempre se o evento disconnect não chegar
-  setTimeout(() => selfDisconnects.delete(guildId), 5000).unref?.();
+  selfDisconnects.delete(guildId);
 }
 
 function init(client) {
@@ -155,10 +157,16 @@ const events = {
 
     const queue = distube.getQueue(guild.id);
     if (!queue) {
-      const t = emptyChannelTimers.get(guild.id);
-      if (t) {
-        clearTimeout(t);
+      // Sem fila mas com ligação pendurada (ex: /stop sem sair, ou fila removida
+      // pelo gestor), também há que desligar quando não há ouvintes
+      const pending = emptyChannelTimers.get(guild.id);
+      if (pending) {
+        clearTimeout(pending);
         emptyChannelTimers.delete(guild.id);
+      }
+      const connected = guild.members.me?.voice?.channel;
+      if (connected && connected.members.filter(m => !m.user.bot).size === 0) {
+        leaveVoice(guild.id, undefined);
       }
       return;
     }

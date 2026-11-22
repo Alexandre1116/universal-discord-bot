@@ -118,13 +118,20 @@ async function startPolling(client) {
         }
         const text = (await res.text()).trim();
 
-        // O decapi devolve "2 hours, 11 minutes" quando está em direto e coisas
-        // como "offline", "No user with the name X found" ou avisos de rate-limit
-        // quando não está. Detetar em POSITIVO: tratar corpo desconhecido como
-        // "em direto" gerava anúncios falsos.
-        const isLive = /\d+\s*(second|minute|hour|day)/i.test(text);
-        const recognised = isLive || /offline|not\s+found|error|rate|slow|invalid/i.test(text);
-        if (!recognised) {
+        // O decapi devolve a duração ("2 hours, 25 minutes") quando está em
+        // direto e coisas como "offline", "No user with the name X found" ou
+        // avisos de rate-limit quando não está. Detetar em POSITIVO e com o
+        // corpo inteiro ancorado: "try again in 30 seconds" também tem número +
+        // unidade e contava como direto.
+        const providerError = /not\s+found|error|rate limit|too many|slow|invalid|forbidden|unauthorized/i.test(text);
+        if (providerError) {
+          console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: erro do fornecedor ("${text.slice(0, 80)}"); estado mantém-se.`);
+          continue;
+        }
+
+        const isLive = /^\d+\s*(seconds?|minutes?|hours?|days?)([,\s]+\d+\s*(seconds?|minutes?|hours?|days?))*$/i.test(text);
+        const isOffline = /offline/i.test(text);
+        if (!isLive && !isOffline) {
           console.warn(`[NOTIFICATIONS] Twitch ${tw.username}: resposta não reconhecida ("${text.slice(0, 80)}"); estado não alterado.`);
           continue;
         }

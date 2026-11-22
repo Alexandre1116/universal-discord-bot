@@ -44,6 +44,12 @@ const loginLimiter = rateLimit({
   message: { success: false, error: 'Demasiadas tentativas de login. Tenta novamente mais tarde.' }
 });
 
+// O restauro envia a base de dados inteira em base64: o limite por omissão do
+// body-parser (100 KB) rebentava com 413 em backups perfeitamente normais (uma
+// BD com 90 dias de histórico de um servidor já passa os 100 KB). Montado antes
+// do parser global — o body-parser não volta a fazer parse (req._body).
+app.use('/api/restore', bodyParser.json({ limit: process.env.RESTORE_BODY_LIMIT || '50mb' }));
+
 app.use(bodyParser.json());
 // Garantir session secret persistente
 const sessionSecret = process.env.SESSION_SECRET || (() => {
