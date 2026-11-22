@@ -10,6 +10,12 @@ const emptyChannelTimers = new Map();
 const EMPTY_CHANNEL_GRACE_MS = 30000;
 
 function leaveVoice(guildId, queue) {
+  // Cancela a saída agendada por "canal vazio": já estamos a sair
+  const pendingEmpty = emptyChannelTimers.get(guildId);
+  if (pendingEmpty) {
+    clearTimeout(pendingEmpty);
+    emptyChannelTimers.delete(guildId);
+  }
   selfDisconnects.add(guildId);
   try {
     if (queue?.voice) queue.voice.leave();
@@ -218,18 +224,19 @@ const events = {
       const query = interaction.options.getString('query');
       await interaction.deferReply();
       try {
-        // distube.play() resolve com { song, error } — aguardar e confirmar
-        // evita anunciar "a procurar" quando o pedido já falhou ou já entrou na fila
-        const result = await distube.play(voiceChannel, query, {
+        // No DisTube 5.2.3 play() devolve Promise<void>: a confirmação é lida da
+        // fila depois do await (o nome chega pelo evento playSong)
+        await distube.play(voiceChannel, query, {
           member,
           textChannel: interaction.channel
         });
-        if (result?.error) {
-          await interaction.editReply(`❌ Não consegui tocar isso: ${String(result.error.message || result.error).slice(0, 180)}`);
-          return;
+        const q = distube.getQueue(interaction.guild.id);
+        const current = q?.songs?.[0];
+        if (current) {
+          await interaction.editReply(`🎶 ${String(current.name).slice(0, 100)} — ${q.songs.length > 1 ? `${q.songs.length} músicas na fila` : 'a tocar'}.`);
+        } else {
+          await interaction.editReply('🎶 Pedido aceite.');
         }
-        const name = String(result?.song?.name || 'Música').slice(0, 100);
-        await interaction.editReply(`🎶 ${name} — na fila ${result?.song?.formattedDuration ? `(${result.song.formattedDuration})` : ''}.`);
       } catch (err) {
         console.error('[MUSIC] Erro play:', err.message);
         await interaction.editReply(`❌ Não consegui tocar isso: ${String(err.message).slice(0, 180)}`);

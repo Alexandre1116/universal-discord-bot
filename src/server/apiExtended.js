@@ -444,18 +444,23 @@ router.post('/restore', (req, res) => {
       if (!parsedConfig.sessionSecret) parsedConfig.sessionSecret = current.sessionSecret;
     }
 
-    // 3) Só agora escrevemos: primeiro o config (atómico e independente da BD),
-    // depois fechamos a base de dados e substituímos o ficheiro
-    if (parsedConfig && !saveConfig(parsedConfig)) {
-      throw new Error('Falha ao gravar o config restaurado em disco.');
-    }
+    // 3) Só agora escrevemos. Primeiro o ficheiro novo da BD para um temporário
+    // (falhar aqui não altera nada); depois o config; por fim fechamos a BD e
+    // fazemos rename — assim não fica config novo com BD antiga/fechada.
+    const tmpDb = `${DB_PATH}.restore`;
+    if (dbBuffer) fs.writeFileSync(tmpDb, dbBuffer);
 
-    shutdownDb();
+    try {
+      if (parsedConfig && !saveConfig(parsedConfig)) {
+        throw new Error('Falha ao gravar o config restaurado em disco.');
+      }
 
-    if (dbBuffer) {
-      const tmpDb = `${DB_PATH}.restore`;
-      fs.writeFileSync(tmpDb, dbBuffer);
-      fs.renameSync(tmpDb, DB_PATH);
+      if (dbBuffer) {
+        shutdownDb();
+        fs.renameSync(tmpDb, DB_PATH);
+      }
+    } finally {
+      if (dbBuffer && fs.existsSync(tmpDb)) fs.unlinkSync(tmpDb);
     }
 
     res.json({ success: true, message: 'Restauro concluído! A reiniciar o sistema...' });

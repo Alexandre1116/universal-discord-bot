@@ -165,13 +165,27 @@ function reconcileVoiceSessions(client, levelsConfig) {
     stopAllVoiceTimers();
     return;
   }
+  const inVoice = new Map();
   for (const guild of client.guilds.cache.values()) {
     for (const state of guild.voiceStates.cache.values()) {
       // VoiceState usa .id (o user_id); 'memberId' não existe no discord.js v14
       const memberId = state.id;
       if (!memberId || state.channelId == null) continue;
       if (!state.member || state.member.user.bot) continue;
+      if (!inVoice.has(guild.id)) inVoice.set(guild.id, new Set());
+      inVoice.get(guild.id).add(memberId);
       startVoiceTimer(client, guild, memberId, levelsConfig);
+    }
+  }
+
+  // Pára timers de quem já não está em voz (o voiceStateUpdate pode ter-se perdido)
+  for (const [guildId, timers] of voiceTimers.entries()) {
+    if (!client.guilds.cache.has(guildId)) continue;
+    const present = inVoice.get(guildId) || new Set();
+    for (const [memberId, timer] of [...timers.entries()]) {
+      if (present.has(memberId)) continue;
+      clearInterval(timer);
+      timers.delete(memberId);
     }
   }
 }

@@ -744,7 +744,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderExistingRR(list) {
     const el = document.getElementById('rrExistingList');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><p>Nenhum painel.</p></div>'; return; }
-    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${rr.title || 'Reaction Roles'}</h5><p>${(rr.roles || []).length} cargos | Canal: ${rr.channelId}</p></div><button class="btn btn-danger btn-sm" onclick="deleteRR('${rr.id}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${escapeHtml(rr.title || 'Reaction Roles')}</h5><p>${(rr.roles || []).length} cargos | Canal: ${escapeHtml(rr.channelId)}</p></div><button class="btn btn-danger btn-sm" onclick="deleteRR('${escapeHtml(rr.id)}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
   window.deleteRR = async id => {
     await fetch(`/api/reaction-roles/${id}`, { method: 'DELETE' });
@@ -799,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const el = document.getElementById('leaderboardList');
       const medals = ['🥇', '🥈', '🥉'];
       if (!d.length) { el.innerHTML = '<div class="empty-state"><p>Sem dados de XP.</p></div>'; return; }
-      el.innerHTML = d.map((e, i) => `<div class="leaderboard-entry"><span class="leaderboard-rank">${i < 3 ? medals[i] : '#' + (i + 1)}</span><div class="leaderboard-info"><h5>${e.user_id}</h5><span>Nível ${e.level} | ${e.total_messages} msgs</span></div><span class="leaderboard-xp">${e.xp} XP</span></div>`).join('');
+      el.innerHTML = d.map((e, i) => `<div class="leaderboard-entry"><span class="leaderboard-rank">${i < 3 ? medals[i] : '#' + (i + 1)}</span><div class="leaderboard-info"><h5>${escapeHtml(e.user_id)}</h5><span>Nível ${escapeHtml(e.level)} | ${escapeHtml(e.total_messages)} msgs</span></div><span class="leaderboard-xp">${escapeHtml(e.xp)} XP</span></div>`).join('');
     } catch (e) { console.error(e); }
   }
 
@@ -830,7 +830,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/scheduled-messages/${guildId}`); const d = await r.json();
       const el = document.getElementById('scheduledList');
       if (!d.length) { el.innerHTML = '<div class="empty-state"><p>Sem agendados.</p></div>'; return; }
-      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${m.content?.substring(0, 50) || 'Embed'}</h5><span>Cron: ${m.cron_expression || 'One-shot'} | Canal: ${m.channel_id}</span></div><button class="btn btn-danger btn-sm" onclick="deleteSched(${m.id})"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${escapeHtml(m.content?.substring(0, 50) || 'Embed')}</h5><span>Cron: ${escapeHtml(m.cron_expression || 'One-shot')} | Canal: ${escapeHtml(m.channel_id)}</span></div><button class="btn btn-danger btn-sm" onclick="deleteSched(${Number(m.id) || 0})"><i class="fa-solid fa-trash"></i></button></div>`).join('');
     } catch (e) { console.error(e); }
   }
   window.deleteSched = async id => {
@@ -845,7 +845,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/giveaways/${guildId}`); const d = await r.json();
       const el = document.getElementById('giveawaysList');
       if (!d.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-gift"></i><p>Sem sorteios.</p></div>'; return; }
-      el.innerHTML = d.map(g => `<div class="giveaway-card"><div class="giveaway-info"><h5>🎉 ${g.prize}</h5><span>${g.winners_count} vencedor(es) | Termina: ${new Date(g.ends_at).toLocaleString('pt-PT')}</span></div><span class="giveaway-status ${g.ended ? 'ended' : 'active'}">${g.ended ? 'Terminado' : 'Ativo'}</span></div>`).join('');
+      el.innerHTML = d.map(g => `<div class="giveaway-card"><div class="giveaway-info"><h5>🎉 ${escapeHtml(g.prize)}</h5><span>${escapeHtml(g.winners_count)} vencedor(es) | Termina: ${new Date(g.ends_at).toLocaleString('pt-PT')}</span></div><span class="giveaway-status ${g.ended ? 'ended' : 'active'}">${g.ended ? 'Terminado' : 'Ativo'}</span></div>`).join('');
     } catch (e) { console.error(e); }
   }
 

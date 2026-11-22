@@ -125,6 +125,10 @@ const events = {
         return interaction.reply({ content: 'Apenas quem abriu o ticket (ou a equipa de suporte) o pode fechar.', ephemeral: true });
       }
 
+      // A trava é libertada no fim, exceto quando o fecho ficou ao cuidado do
+      // setTimeout (durante os 5 s um segundo /ticket-close não pode entrar)
+      let closingHeldByTimeout = false;
+
       try {
         await interaction.reply('🔒 A fechar este ticket em 5 segundos...');
 
@@ -142,11 +146,14 @@ const events = {
         // 2) Só depois marca fechado na BD
         closeTicket(channelId);
 
+        closingHeldByTimeout = true;
         setTimeout(async () => {
           try {
             await interaction.channel.delete();
           } catch (err) {
             console.error('[TICKETS] Erro ao apagar canal de ticket:', err.message);
+          } finally {
+            closing.delete(channelId);
           }
         }, 5000);
       } catch (err) {
@@ -157,7 +164,7 @@ const events = {
           await interaction.reply({ content: 'Erro ao fechar ticket.', ephemeral: true }).catch(() => {});
         }
       } finally {
-        closing.delete(channelId);
+        if (!closingHeldByTimeout) closing.delete(channelId);
       }
     }
 

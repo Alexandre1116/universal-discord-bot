@@ -82,7 +82,17 @@ async function cleanupDepartedTempChannel(guild, departedChannelId) {
   const tempInfo = channels.find(c => c.channelId === departedChannelId);
   if (!tempInfo) return;
 
-  const channel = guild.channels.cache.get(departedChannelId);
+  let channel = guild.channels.cache.get(departedChannelId);
+  if (!channel) {
+    // O canal pode não estar em cache (restart/falha de cache): confirmar antes
+    // de desistir, tal como faz o cleanup periódico
+    try {
+      channel = await guild.channels.fetch(departedChannelId);
+    } catch (err) {
+      if (err.code === 10003) forget(guild.id, departedChannelId);
+      return;
+    }
+  }
   if (!channel || channel.members.size > 0) return;
 
   try {

@@ -139,9 +139,16 @@ function saveConfig(newConfig) {
 }
 
 function updateConfig(updates) {
-  if (readFailed && !lastGoodConfig) {
-    console.error('[CONFIG] config.json ilegível e sem cópia em memória: nenhuma alteração gravada (evita apagar a configuração).');
-    return null;
+  if (readFailed) {
+    // A leitura anterior falhou: tenta reler antes de escrever (o ficheiro pode
+    // ter voltado) e nunca escrever as predefinições por cima do ficheiro real
+    readFailed = false;
+    getConfig();
+    if (readFailed && !lastGoodConfig) {
+      console.error('[CONFIG] config.json ilegível e sem cópia em memória: nenhuma alteração gravada (evita apagar a configuração).');
+      return null;
+    }
+    if (readFailed) console.error('[CONFIG] A gravar a partir da última configuração conhecida em memória — verifica o config.json.');
   }
   const current = getConfig();
   const merged = { ...current, ...updates };

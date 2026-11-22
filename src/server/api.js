@@ -39,7 +39,9 @@ router.post('/plugins/toggle', (req, res) => {
   const config = getConfig();
   if (!config.plugins) config.plugins = {};
   config.plugins[pluginId] = enabled;
-  updateConfig({ plugins: config.plugins });
+  if (!updateConfig({ plugins: config.plugins })) {
+    return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+  }
   res.json({ success: true });
 });
 
@@ -123,12 +125,17 @@ router.post('/config', (req, res) => {
 
     if (token && token.trim() !== '' && !token.includes('••••')) {
       updates.token = token.trim();
-      process.env.DISCORD_TOKEN = token.trim();
     }
 
     const updated = updateConfig(updates);
     if (!updated) {
       return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
+
+    // O ambiente só muda com a gravação confirmada (senão um 500 deixava o
+    // processo com um token que não está em lado nenhum persistente)
+    if (updates.token) {
+      process.env.DISCORD_TOKEN = updates.token;
     }
 
     if (updates.token) {
@@ -151,7 +158,9 @@ router.post('/presence', (req, res) => {
   try {
     const { status, activityType, activityText } = req.body;
     const updates = { presence: { status, activityType, activityText } };
-    updateConfig(updates);
+    if (!updateConfig(updates)) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     
     if (client.user) {
       const typeMap = {
@@ -288,7 +297,9 @@ router.post('/hubs', (req, res) => {
       voiceHubs.push(hubItem);
     }
 
-    updateConfig({ voiceHubs });
+    if (!updateConfig({ voiceHubs })) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     res.json({ success: true, voiceHubs });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -302,7 +313,9 @@ router.delete('/hubs/:id', (req, res) => {
     const config = getConfig();
     let voiceHubs = config.voiceHubs || [];
     voiceHubs = voiceHubs.filter(h => h.id !== id && h.channelId !== id);
-    updateConfig({ voiceHubs });
+    if (!updateConfig({ voiceHubs })) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     res.json({ success: true, voiceHubs });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

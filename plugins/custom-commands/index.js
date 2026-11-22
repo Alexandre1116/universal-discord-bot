@@ -44,7 +44,8 @@ const events = {
 
       const matchType = cmd.matchType || 'exact';
       // Em regex usa-se o padrão TAL COMO foi gravado (remover o prefixo
-      // corrompia padrões como ".*promo" ou "!help|?ajuda")
+      // corrompia padrões como ".*promo"). NOTA: o padrão é testado sobre o
+      // conteúdo JÁ SEM o prefixo "!" — escrever "^help", não "^!help".
       const rawTrigger = String(cmd.trigger).trim();
       const trigger = matchType === 'regex' ? rawTrigger : normalizeTrigger(rawTrigger);
       if (!trigger) continue;
