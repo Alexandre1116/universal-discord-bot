@@ -415,7 +415,7 @@ router.post('/restore', async (req, res) => {
   const ioError = message => Object.assign(new Error(message), { status: 500 });
 
   try {
-    const { config, database } = req.body;
+    const { config, database } = req.body || {};
 
     // 1) VALIDAR ANTES de tocar em seja o que for: um backup partido não pode
     // deixar o painel sem credenciais nem a base de dados corrompida

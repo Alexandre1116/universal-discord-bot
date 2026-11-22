@@ -192,6 +192,8 @@ const ROOT = path.resolve(__dirname, '..');
   rec('tickets: exige ticket aberto OU suporte', tick.includes('if (!ticket && !isSupport)') && tick.includes('closing.has(channelId)'));
   rec('tickets: transcricao antes de fechar, paginada, closeTicket verificado', tick.includes('for (let page = 0; page < 10; page++)') && tick.includes('const persisted = closeTicket(channelId);') && tick.includes('if (!persisted)') && tick.includes('closingHeldByTimeout'));
   rec('tickets: so 10003 fecha registo fantasma; createTicket verificado', tick.includes('err.code === 10003 ? null : undefined') && tick.includes('const created = createTicket('));
+  rec('tickets: abertura diferida antes da rede e sem reply duplicado', /customId === 'ticket_open'[\s\S]{0,400}?deferReply\(\{ ephemeral: true \}\)/.test(tick) && tick.includes('Ticket criado: ${ticketChannel}'));
+  rec('apiExtended: apagar agendamento distingue 404 de 500', apiExt.includes('Agendamento não encontrado') && apiExt.includes('removed.changes === 0'));
   rec('giveaways: nao anuncia se a gravacao falhar', /const closed = endGiveaway\(gw\.id, winners\);\s*if \(!closed\) \{[\s\S]{0,240}?return;/.test(gw) && gw.includes('closed.persisted === false'));
   rec('voice-hubs: regista antes de mover e esquece em 10003', hubs.includes('remember(guild.id, {') && hubs.includes('if (err.code === 10003) forget(guildId, entry.channelId);'));
   rec('voice-hubs: exige mudanca real de canal e serializa criacoes', hubs.includes('oldState.channelId !== newState.channelId') && hubs.includes('hubCreations.delete(lockKey)'));

@@ -51,7 +51,7 @@ const loginLimiter = rateLimit({
 // qualquer pessoa sem sessão fazia o processo ler e analisar dezenas de MB. Aqui
 // apenas deixamos esse pedido passar sem parser.
 app.use((req, res, next) => {
-  if (req.method === 'POST' && req.path === '/api/restore') return next();
+  if (req.method === 'POST' && req.path.toLowerCase() === '/api/restore') return next();
   return bodyParser.json()(req, res, next);
 });
 // Garantir session secret persistente

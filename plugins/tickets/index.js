@@ -189,6 +189,16 @@ const events = {
       const config = getConfig();
       const ticketsConfig = config.tickets || {};
 
+      // Há chamadas à rede antes de poder responder (procurar o canal antigo,
+      // criar o novo, aplicar overwrites): diferimos já, em efémero, senão a
+      // interação expira e o clique fica sem resposta visível.
+      try {
+        await interaction.deferReply({ ephemeral: true });
+      } catch (err) {
+        console.error('[TICKETS] Falha ao confirmar o pedido de abertura:', err.message);
+        return;
+      }
+
       const existing = getUserOpenTicket(interaction.guild.id, interaction.user.id);
       if (existing) {
         // Se o canal foi apagado à mão, o registo ficava "open" para sempre e o
@@ -201,17 +211,18 @@ const events = {
         if (existingChannel === null) {
           closeTicket(existing.channel_id);
         } else if (existingChannel) {
-          return interaction.reply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.', ephemeral: true });
+          return interaction.editReply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.' });
         } else {
-          return interaction.reply({ content: 'Não consegui confirmar o teu ticket aberto (erro temporário). Tenta outra vez.', ephemeral: true });
+          return interaction.editReply({ content: 'Não consegui confirmar o teu ticket aberto (erro temporário). Tenta outra vez.' });
         }
       }
 
+      let ticketChannel = null;
       try {
         const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30);
         const parentId = ticketsConfig.categoryId || null;
 
-        const ticketChannel = await interaction.guild.channels.create({
+        ticketChannel = await interaction.guild.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
           parent: parentId,
@@ -234,9 +245,8 @@ const events = {
           // Sem registo, o canal ficava órfão (e /ticket-close não o tratava):
           // desfazemos o canal em vez de deixar um ticket invisível
           await ticketChannel.delete('Registo do ticket falhou.').catch(() => {});
-          return interaction.reply({
-            content: 'Não consegui registar o ticket na base de dados — o canal foi removido. Tenta outra vez.',
-            ephemeral: true
+          return interaction.editReply({
+            content: 'Não consegui registar o ticket na base de dados — o canal foi removido. Tenta outra vez.'
           });
         }
 
@@ -247,10 +257,17 @@ const events = {
           .setTimestamp();
 
         await ticketChannel.send({ content: `<@${interaction.user.id}> ${ticketsConfig.supportRoleId ? `<@&${ticketsConfig.supportRoleId}>` : ''}`, embeds: [embed] });
-        await interaction.reply({ content: `Ticket criado: ${ticketChannel}`, ephemeral: true });
+        await interaction.editReply({ content: `Ticket criado: ${ticketChannel}` });
       } catch (err) {
         console.error('[TICKETS] Erro ao criar ticket:', err.message);
-        await interaction.reply({ content: 'Erro ao criar ticket. Verifica as permissões do bot.', ephemeral: true });
+        // Se o canal já foi criado, há que dizê-lo: sem isto ficava um canal de
+        // suporte aberto com uma mensagem a dizer que tudo falhou
+        const note = ticketChannel ? ` O canal ${ticketChannel} chegou a ser criado — usa \`/ticket-close\` para o fechar.` : '';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: `Erro ao criar ticket. Verifica as permissões do bot.${note}` }).catch(() => {});
+        } else {
+          await interaction.reply({ content: 'Erro ao criar ticket. Verifica as permissões do bot.', ephemeral: true }).catch(() => {});
+        }
       }
     }
   }
