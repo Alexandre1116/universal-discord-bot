@@ -14,7 +14,7 @@ O bot já vem com um leque formidável de plugins oficiais (que podes desativar 
 - **Giveaways**: Sistema de sorteios nativo e interativo via botões.
 - **Levels & Voice XP**: Os utilizadores ganham XP não apenas a escrever em canais de texto, mas também de forma passiva quando permanecem conectados em canais de voz!
 - **Moderation**: Sistema de Ban, Kick, Mute, Clear, com Auto-Mod (anti-spam, caps, anti-link e palavras proibidas).
-- **Music**: Sistema de Música avançado nativo movido a DisTube (suporta YouTube, Spotify, SoundCloud).
+- **Music**: Sistema de Música avançado nativo movido a DisTube (YouTube; Spotify/SoundCloud exigem extratores adicionais do DisTube).
 - **Notifications**: Motor node-cron para enviares alertas das tuas livestreams da Twitch e dos vídeos de YouTube mal eles saiam.
 - **Reaction Roles**: A clássica, porém moderna e em botões, forma de gerir cargos (roles) automáticos.
 - **Tickets**: Configura botões para gerar de forma rápida e controlada tickets privados entre ti e a tua comunidade.

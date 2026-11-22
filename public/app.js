@@ -206,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Categories
       const cr = await fetch('/api/categories'); const cats = await cr.json();
       const catSel = document.getElementById('ticketCategory');
-      catSel.innerHTML = '<option value="">Sem categoria</option>' + cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      catSel.innerHTML = '<option value="">Sem categoria</option>' + cats.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
       if (d.categoryId) catSel.value = d.categoryId;
     } catch (e) { console.error(e); }
   }
@@ -247,7 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderGuilds(guilds) {
     const el = document.getElementById('guildsList');
     if (!guilds.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-robot"></i><p>Sem servidores.</p></div>'; return; }
-    el.innerHTML = guilds.map(g => `<div class="guild-card"><div class="guild-icon">${g.icon ? `<img src="${g.icon}" style="width:100%;height:100%;border-radius:50%">` : g.name[0]}</div><div class="guild-info"><h4>${g.name}</h4><span>${g.textChannels.length} texto | ${g.voiceChannels.length} voz</span></div></div>`).join('');
+    el.innerHTML = guilds.map(g => `<div class="guild-card"><div class="guild-icon">${g.icon ? `<img src="${escapeHtml(g.icon)}" style="width:100%;height:100%;border-radius:50%">` : escapeHtml(g.name[0])}</div><div class="guild-info"><h4>${escapeHtml(g.name)}</h4><span>${g.textChannels.length} texto | ${g.voiceChannels.length} voz</span></div></div>`).join('');
   }
 
   function populateChannelDropdowns(guilds) {
@@ -278,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderVoiceHubs(hubs) {
     const el = document.getElementById('voiceHubsList');
     if (!hubs.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-microphone-slash"></i><p>Nenhum hub.</p></div>'; return; }
-    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${h.channelId}</h5><p>Padrão: <code>${h.namePattern}</code> | Limite: ${h.userLimit > 0 ? h.userLimit : 'Original'}</p></div><button class="btn btn-danger btn-sm" onclick="deleteHub('${h.id || h.channelId}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${escapeHtml(h.channelId)}</h5><p>Padrão: <code>${escapeHtml(h.namePattern)}</code> | Limite: ${h.userLimit > 0 ? escapeHtml(h.userLimit) : 'Original'}</p></div><button class="btn btn-danger btn-sm" onclick="deleteHub('${escapeHtml(h.id || h.channelId)}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
 
   // ========== PREVIEWS ==========
@@ -337,15 +337,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // JOIN
   document.getElementById('formJoinConfig').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/config', { joinMessage: { enabled: getChecked('joinEnabled'), channelId: getVal('joinChannelSelect'), messageType: getVal('joinMessageType'), embedTitle: getVal('joinEmbedTitle'), content: getVal('joinContent'), embedColor: getVal('joinEmbedColor'), showAvatar: getChecked('joinShowAvatar'), generateImage: getChecked('joinGenerateImage'), imageBackgroundUrl: getVal('joinImageBackgroundUrl') } });
-    showToast('Boas-vindas guardadas!'); fetchConfig();
+    const r = await postJson('/api/config', { joinMessage: { enabled: getChecked('joinEnabled'), channelId: getVal('joinChannelSelect'), messageType: getVal('joinMessageType'), embedTitle: getVal('joinEmbedTitle'), content: getVal('joinContent'), embedColor: getVal('joinEmbedColor'), showAvatar: getChecked('joinShowAvatar'), generateImage: getChecked('joinGenerateImage'), imageBackgroundUrl: getVal('joinImageBackgroundUrl') } });
+    showToast(r.success ? 'Boas-vindas guardadas!' : (r.error || 'Falha ao guardar.'), !r.success);
+    if (r.success) fetchConfig();
   });
 
   // LEAVE
   document.getElementById('formLeaveConfig').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/config', { leaveMessage: { enabled: getChecked('leaveEnabled'), channelId: getVal('leaveChannelSelect'), messageType: getVal('leaveMessageType'), embedTitle: getVal('leaveEmbedTitle'), content: getVal('leaveContent'), embedColor: getVal('leaveEmbedColor'), showAvatar: getChecked('leaveShowAvatar') } });
-    showToast('Saída guardada!'); fetchConfig();
+    const r = await postJson('/api/config', { leaveMessage: { enabled: getChecked('leaveEnabled'), channelId: getVal('leaveChannelSelect'), messageType: getVal('leaveMessageType'), embedTitle: getVal('leaveEmbedTitle'), content: getVal('leaveContent'), embedColor: getVal('leaveEmbedColor'), showAvatar: getChecked('leaveShowAvatar') } });
+    showToast(r.success ? 'Saída guardada!' : (r.error || 'Falha ao guardar.'), !r.success);
+    if (r.success) fetchConfig();
   });
 
   // TEST JOIN/LEAVE
@@ -364,8 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formAddVoiceHub').addEventListener('submit', async e => {
     e.preventDefault();
     const ch = getVal('voiceHubSelect'); if (!ch) return showToast('Seleciona um canal!', true);
-    await postJson('/api/hubs', { channelId: ch, namePattern: getVal('voiceNamePattern'), userLimit: getVal('voiceUserLimit') });
-    showToast('Hub adicionado!'); fetchConfig();
+    const r = await postJson('/api/hubs', { channelId: ch, namePattern: getVal('voiceNamePattern'), userLimit: getVal('voiceUserLimit') });
+    if (notifySaved(r, 'Hub adicionado!')) fetchConfig();
   });
   window.deleteHub = async id => {
     await fetch(`/api/hubs/${id}`, { method: 'DELETE' });
@@ -375,32 +377,32 @@ document.addEventListener('DOMContentLoaded', () => {
   // MODERATION
   document.getElementById('formModeration').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/moderation', {
+    const r = await postJson('/api/moderation', {
       enabled: getChecked('modEnabled'), antiSpam: getChecked('modAntiSpam'), antiLinks: getChecked('modAntiLinks'), antiCaps: getChecked('modAntiCaps'),
       bannedWords: getVal('modBannedWords').split('\n').map(w => w.trim()).filter(w => w),
       maxStrikes: parseInt(getVal('modMaxStrikes')) || 3, strikeAction: getVal('modStrikeAction')
     });
-    showToast('Moderação guardada!');
+    notifySaved(r, 'Moderação guardada!');
   });
 
   // AUDIT LOG
   document.getElementById('formAuditLog').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/audit-log', {
+    const r = await postJson('/api/audit-log', {
       enabled: getChecked('auditEnabled'), channelId: getVal('auditChannelSelect'),
       messageDelete: getChecked('auditMsgDelete'), messageEdit: getChecked('auditMsgEdit'),
       bans: getChecked('auditBans'), voiceJoinLeave: getChecked('auditVoice')
     });
-    showToast('Audit Log guardado!');
+    notifySaved(r, 'Audit Log guardado!');
   });
 
   // TICKETS
   document.getElementById('formTickets').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/tickets/config', {
+    const r = await postJson('/api/tickets/config', {
       supportRoleId: getVal('ticketSupportRole'), categoryId: getVal('ticketCategory'), logChannelId: getVal('ticketLogChannel')
     });
-    showToast('Tickets configurados!');
+    notifySaved(r, 'Tickets configurados!');
   });
 
   // REACTION ROLES
@@ -452,7 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Guarda a entrada original para não perder campos que este formulário não
     // mostra (type/title/color dos embeds já gravados)
     if (original) row.dataset.original = JSON.stringify(original);
-    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — sem o !)" value="${escapeHtml(trigger)}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${escapeHtml(response)}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — a mensagem usa !regras)" value="${escapeHtml(trigger)}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${escapeHtml(response)}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -484,11 +486,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!nav || !main) return;
 
     // Só plugins ATIVOS com ui/tab.html recebem aba
-    plugins.filter(p => p.hasUi && p.enabled).forEach(p => {
+    const wanted = plugins.filter(p => p.hasUi && p.enabled);
+    const wantedIds = new Set(wanted.map(p => p.folderId));
+
+    // Retira abas de plugins que foram desativados/eliminados desde a última atualização
+    document.querySelectorAll('.nav-item[data-tab^="tab-plugin-"]').forEach(btn => {
+      const folderId = btn.getAttribute('data-tab').slice('tab-plugin-'.length);
+      if (wantedIds.has(folderId)) return;
+      const section = document.getElementById(`tab-plugin-${folderId}`);
+      btn.remove();
+      if (section) section.remove();
+    });
+
+    wanted.forEach(p => {
       const tabId = `tab-plugin-${p.folderId}`;
       if (document.getElementById(tabId)) return;
 
       const uiBase = `/api/plugins-ui/${encodeURIComponent(p.folderId)}/ui/`;
+      // Caminhos relativos do tab.html resolvem contra a pasta ui/ do plugin
+      const resolveAsset = (raw) => {
+        if (!raw) return raw;
+        if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('/') || raw.startsWith('data:') || raw.startsWith('#')) return raw;
+        return uiBase + raw.replace(/^\.\/?/, '');
+      };
 
       const btn = document.createElement('button');
       btn.className = 'nav-item';
@@ -517,22 +537,24 @@ document.addEventListener('DOMContentLoaded', () => {
           const res = await fetch(`${uiBase}tab.html`);
           if (!res.ok) throw new Error(`tab.html não encontrado (HTTP ${res.status})`);
           container.innerHTML = await res.text();
-          container.dataset.loaded = '1';
-          // Recria <script> (sozinhos não executam) e resolve caminhos
-          // relativos contra a pasta ui/ do plugin, não contra o painel
+
+          // Estilos/imagens relativos
+          container.querySelectorAll('link[href], img[src], source[src], video[src], audio[src], iframe[src]').forEach(el => {
+            const attr = el.hasAttribute('href') ? 'href' : 'src';
+            el.setAttribute(attr, resolveAsset(el.getAttribute(attr)));
+          });
+
+          // Recria <script> (sozinhos não executam)
           container.querySelectorAll('script').forEach(old => {
             const fresh = document.createElement('script');
             const rawSrc = old.getAttribute('src');
-            if (rawSrc) {
-              fresh.src = (/^https?:/i.test(rawSrc) || rawSrc.startsWith('/'))
-                ? rawSrc
-                : uiBase + rawSrc.replace(/^\.\/?/, '');
-            } else {
-              fresh.textContent = old.textContent;
-            }
+            if (rawSrc) fresh.src = resolveAsset(rawSrc);
+            else fresh.textContent = old.textContent;
             if (old.type) fresh.type = old.type;
             old.replaceWith(fresh);
           });
+
+          container.dataset.loaded = '1';
         } catch (err) {
           container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${escapeHtml(err.message)}</p>`;
         }
@@ -615,16 +637,18 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { console.error(e); }
   }
 
+  // Nomes de cargos/canais vêm do Discord e são controláveis por quem tem
+  // "Gerir Cargos" num servidor: têm de ser escapados antes de irem para HTML
   function channelOptions(selected) {
     let opts = '<option value="">-- Selecionar Canal --</option>';
     currentGuilds.forEach(g => {
-      if (g.textChannels.length) { opts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}># ${c.name}</option>`).join('')}</optgroup>`; }
+      if (g.textChannels.length) { opts += `<optgroup label="${escapeHtml(g.name)}">${g.textChannels.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === selected ? 'selected' : ''}># ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
     });
     return opts;
   }
 
   function roleOptions(selected) {
-    return '<option value="">-- Sem cargo --</option>' + serverRoles.map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${r.name}</option>`).join('');
+    return '<option value="">-- Sem cargo --</option>' + serverRoles.map(r => `<option value="${escapeHtml(r.id)}" ${r.id === selected ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
   }
 
   function renderNotifications(list) {
@@ -651,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${youtubeId}"><select class="form-control notif-channel">${channelOptions(discordChannelId)}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem (usa {title} {url})" value="${message || ''}"><select class="form-control notif-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${escapeHtml(youtubeId)}"><select class="form-control notif-channel">${channelOptions(discordChannelId)}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem (usa {title} {url})" value="${escapeHtml(message || '')}"><select class="form-control notif-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -674,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<input type="text" class="form-control tw-name" placeholder="Nome do canal Twitch" value="${username}"><select class="form-control tw-channel">${channelOptions(discordChannelId)}</select><select class="form-control tw-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<input type="text" class="form-control tw-name" placeholder="Nome do canal Twitch" value="${escapeHtml(username)}"><select class="form-control tw-channel">${channelOptions(discordChannelId)}</select><select class="form-control tw-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -713,7 +737,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('rrRolesList');
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}</select><input type="text" class="form-control" placeholder="Emoji" style="max-width:60px"><input type="text" class="form-control" placeholder="Label do botão"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select><input type="text" class="form-control" placeholder="Emoji" style="max-width:60px"><input type="text" class="form-control" placeholder="Label do botão"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -741,21 +765,21 @@ document.addEventListener('DOMContentLoaded', () => {
         roles.push({ type: typeSel.value, requirement: parseInt(req.value), roleId: roleSel.value });
       }
     });
-    await postJson('/api/levels/config', {
+    const r = await postJson('/api/levels/config', {
       enabled: getChecked('levelsEnabled'), minXp: parseInt(getVal('levelsMinXp')), maxXp: parseInt(getVal('levelsMaxXp')),
       xpCooldown: parseInt(getVal('levelsXpCooldown')), announceChannelId: getVal('levelsAnnounceChannel'), roles,
       voiceXpEnabled: getChecked('levelsVoiceEnabled'),
       voiceXpInterval: parseInt(getVal('levelsVoiceInterval')) || 60,
       voiceXpAmount: parseInt(getVal('levelsVoiceAmount')) || 5
     });
-    showToast('Níveis guardados!');
+    notifySaved(r, 'Níveis guardados!');
   });
 
   function addLevelRoleRow(type = 'level', reqValue = '', roleId = '') {
     const container = document.getElementById('levelRolesList');
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control reward-type" style="max-width:100px"><option value="level" ${type === 'level' ? 'selected' : ''}>Nível</option><option value="xp" ${type === 'xp' ? 'selected' : ''}>XP</option></select><input type="number" class="form-control" placeholder="Requisito" min="1" value="${reqValue}" style="max-width:100px"><select class="form-control reward-role"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${r.id}" ${r.id === roleId ? 'selected' : ''}>${r.name}</option>`).join('')}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control reward-type" style="max-width:100px"><option value="level" ${type === 'level' ? 'selected' : ''}>Nível</option><option value="xp" ${type === 'xp' ? 'selected' : ''}>XP</option></select><input type="number" class="form-control" placeholder="Requisito" min="1" value="${escapeHtml(reqValue)}" style="max-width:100px"><select class="form-control reward-role"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${escapeHtml(r.id)}" ${r.id === roleId ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -860,7 +884,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formBotToken').addEventListener('submit', async e => {
     e.preventDefault();
     const token = getVal('botTokenInput'); if (!token) return showToast('Insere um token!', true);
-    await postJson('/api/config', { token });
+    const r = await postJson('/api/config', { token });
+    if (!r.success) return showToast(r.error || 'Falha ao guardar o token.', true);
     showToast('Token guardado! Bot a reiniciar...'); setTimeout(loadAllData, 3000);
   });
 
@@ -874,8 +899,8 @@ document.addEventListener('DOMContentLoaded', () => {
         activityType: getVal('presenceType'),
         activityText: getVal('presenceText')
       };
-      await postJson('/api/presence', payload);
-      showToast('Status atualizado!');
+      const r = await postJson('/api/presence', payload);
+      notifySaved(r, 'Status atualizado!');
       fetchStatus();
     });
   }
@@ -889,9 +914,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const pw = getVal('webPassword');
     if (pw) payload.password = pw;
     
-    await postJson('/api/web-settings', payload);
-    showToast('Definições guardadas!');
-    setVal('webPassword', '');
+    const r = await postJson('/api/web-settings', payload);
+    notifySaved(r, 'Definições guardadas!');
+    if (r.success) setVal('webPassword', '');
   });
 
   // BACKUP & RESTORE
@@ -930,6 +955,7 @@ document.addEventListener('DOMContentLoaded', () => {
           
           if (confirm('Atenção: Restaurar um backup vai substituir todas as tuas configurações e dados atuais, e reiniciar o bot. Tens a certeza?')) {
             const r = await postJson('/api/restore', content);
+            if (!r.success) return showToast(r.error || 'Falha ao restaurar.', true);
             showToast(r.message || 'Restaurado! A reiniciar...');
             setTimeout(() => location.reload(), 3000);
           }
@@ -945,13 +971,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (formAutoBackup) {
     formAutoBackup.addEventListener('submit', async e => {
       e.preventDefault();
-      await postJson('/api/config', { 
+      const r = await postJson('/api/config', { 
         backup: { 
           autoBackup: getChecked('backupAutoEnabled'), 
           channelId: getVal('backupChannelSelect') 
         } 
       });
-      showToast('Configurações de backup guardadas!');
+      showToast(r.success ? 'Configurações de backup guardadas!' : (r.error || 'Falha ao guardar.'), !r.success);
     });
   }
 
@@ -1018,6 +1044,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 3000); // Polling faster for logs, 3 seconds
 
   // HELPERS
+  // Resultado REAL do pedido (em vez de assumir que gravou)
+  function notifySaved(r, okMessage) {
+    if (r && r.success) {
+      showToast(okMessage);
+      return true;
+    }
+    showToast((r && r.error) || 'Falha ao guardar.', true);
+    return false;
+  }
+
   async function postJson(url, body) {
     try {
       const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
