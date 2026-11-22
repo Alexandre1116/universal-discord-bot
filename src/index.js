@@ -68,7 +68,11 @@ app.use(session({
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 horas
+  // sameSite: 'lax' fecha a porta mais óbvia a CSRF: o browser não envia o
+  // cookie de sessão em POSTs vindos de outro site. Uma proteção anti-CSRF com
+  // token fica apontada como follow-up (todas as rotas de escrita exigem JSON,
+  // o que já bloqueia o ataque por <form>).
+  cookie: { maxAge: 24 * 60 * 60 * 1000, httpOnly: true, sameSite: 'lax' } // 24 horas
 }));
 
 // Servir ficheiros estáticos

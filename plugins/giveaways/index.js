@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
-const { createGiveaway, enterGiveaway, getGiveawayEntries, getActiveGiveaways, endGiveaway, getGiveawayByMessage } = require('../../src/utils/database');
+const { createGiveaway, enterGiveaway, getGiveawayEntries, getActiveGiveaways, endGiveaway, getGiveawayByMessage, parseDbDate } = require('../../src/utils/database');
 
 function init(client) {
   console.log('[GIVEAWAYS] Plugin inicializado.');
@@ -13,17 +13,9 @@ function init(client) {
 const checking = { active: false };
 const finishing = new Set();
 
-// As datas podem vir em ISO 8601 (com 'Z') ou no formato de texto do SQLite
-// ('YYYY-MM-DD HH:MM:SS', sem fuso). Juntar sempre 'Z' rebentava o parse (NaN),
-// por isso só acrescentamos o fuso quando ele não existe.
-function toDate(value) {
-  if (!value) return null;
-  let str = String(value).trim();
-  if (!/[zZ]$/.test(str) && !/[+-]\d{2}:?\d{2}$/.test(str)) str += 'Z';
-  str = str.replace(' ', 'T');
-  const date = new Date(str);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
+// Um único parser de datas para todo o código: ver parseDbDate em
+// src/utils/database.js (aceita ISO e o formato de texto do SQLite)
+const toDate = parseDbDate;
 
 async function checkActiveGiveaways(client) {
   if (checking.active) return;
@@ -181,6 +173,9 @@ const events = {
       const entries = getGiveawayEntries(giveaway.id).length;
       if (entered) {
         await interaction.reply({ content: `✅ Estás inscrito no sorteio! (${entries} participante(s))`, ephemeral: true });
+      } else if (entered === null) {
+        // falha real a gravar, não duplicado
+        await interaction.reply({ content: '⚠️ Não consegui registar a tua participação (erro na base de dados). Tenta outra vez.', ephemeral: true });
       } else {
         await interaction.reply({ content: '⚠️ Já participas neste sorteio.', ephemeral: true });
       }

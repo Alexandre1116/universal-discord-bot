@@ -299,8 +299,10 @@ router.get('/stats/:guildId', (req, res) => {
   const daily = getMessageStatsPerDay(guildId, 30);
   const memberHistory = getMemberHistory(guildId, 30);
 
-  // Resolver nomes de canais
-  const guild = client.guilds.cache.first();
+  // Resolver nomes de canais: usar o servidor PEDIDO (com o bot em vários
+  // servidores, .first() dava nomes do servidor errado — ou o id quando não
+  // estava na cache)
+  const guild = client.guilds.cache.get(guildId);
   const topChannelsNamed = topChannels.map(tc => {
     const ch = guild?.channels.cache.get(tc.channel_id);
     return { ...tc, name: ch ? `#${ch.name}` : tc.channel_id };

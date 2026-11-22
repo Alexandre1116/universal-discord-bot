@@ -88,7 +88,7 @@ function installPluginFromGithub(url) {
     }
 
     console.log(`[PLUGIN MANAGER] A clonar repositório: ${url}`);
-    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit' });
+    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit', timeout: 120000 });
 
     // 4. Validar Licença Open-Source
     const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
@@ -122,7 +122,7 @@ function installPluginFromGithub(url) {
     const packagePath = path.join(pluginPath, 'package.json');
     if (fs.existsSync(packagePath)) {
       console.log(`[PLUGIN MANAGER] A instalar dependências para o plugin ${repoName}...`);
-      execFileSync('npm', ['install'], { cwd: pluginPath, stdio: 'inherit' });
+      execFileSync('npm', ['install'], { cwd: pluginPath, stdio: 'inherit', timeout: 300000 });
     }
 
     // 5. Validar se existe plugin.json

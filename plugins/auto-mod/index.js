@@ -95,7 +95,7 @@ const events = {
     }
 
     if (!violated && modConfig.antiLinks) {
-      const urlPattern = /https?:\/\/[^\s]+|discord\.(gg|me)\/[^\s]+/gi;
+      const urlPattern = /https?:\/\/[^\s]+|discord\.(gg|me)\/[^\s]+|discord(?:app)?\.com\/invite\/[^\s]+/gi;
       const allowedChannels = modConfig.linkAllowedChannels || [];
       if (urlPattern.test(content) && !allowedChannels.includes(message.channel.id)) {
         violated = true;

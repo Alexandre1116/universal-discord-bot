@@ -40,8 +40,11 @@ docker run -p 3000:3000 -d universal-discord-bot
 
 *(No primeiro acesso serás reencaminhado para configurar o utilizador e a senha de administrador).*
 
-### Variáveis de ambiente (opcionais)
+### Requisitos
 
+**Node.js ≥ 22.22.2** (declarado em `engines` no `package.json`). O extrator do YouTube do DisTube (`@distube/youtube` → `@distube/ytdl-core` → `jsdom`) exige essa versão; em Node 18/20 o plugin de música falha ao carregar. O `Dockerfile` já usa `node:22-alpine`.
+
+### Variáveis de ambiente (opcionais)
 | Variável | Efeito |
 |---|---|
 | `PORT` | Porta do painel web (por omissão `3000`). |
@@ -49,6 +52,11 @@ docker run -p 3000:3000 -d universal-discord-bot
 | `CLIENT_ID` | ID da aplicação, para registar slash commands sem depender do arranque. |
 | `SESSION_SECRET` | Segredo das sessões do painel; é gerado automaticamente na primeira execução. |
 | `RESTORE_BODY_LIMIT` | Limite do corpo do pedido de restauro (por omissão `50mb`). Um restauro envia a base de dados em base64, por isso backups com mais de ~37 MB de BD precisam de um valor maior. |
+
+### Notas de funcionamento
+
+- A base de dados (sql.js) vive em memória e é gravada em `data/data.db` de 30 em 30 segundos, e também no encerramento por `SIGINT`/`SIGTERM`. Se o processo for morto à bruta (`kill -9`, `SIGKILL`), perde-se o que estiver dentro desse intervalo.
+- Um restauro bem-sucedido **termina o processo** de propósito. Com o `docker-compose.yml` incluído (`restart: unless-stopped`), o contentor volta a arrancar sozinho; fora de Docker, precisas de um supervisor (systemd, pm2, etc.).
 
 ---
 > 💡 Queres criar o teu próprio plugin para o bot? Lê a documentação: [Como Criar um Plugin Não Oficial](CREATING_PLUGINS.md)

@@ -200,6 +200,8 @@ function reconcileVoiceSessions(client, levelsConfig) {
       clearInterval(entry.timer);
       timers.delete(memberId);
     }
+    // Servidor onde todos saíram de voz: não deixar um Map vazio pendurado
+    if (timers.size === 0) voiceTimers.delete(guildId);
   }
 }
 

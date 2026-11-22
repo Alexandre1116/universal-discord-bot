@@ -118,16 +118,15 @@ const ROOT = path.resolve(__dirname, '..');
   rec('messageCreate: 3 plugins', listeners.messageCreate === 3, JSON.stringify(listeners));
   rec('voiceStateUpdate: 4 (hubs, audit, levels-xp, music)', listeners.voiceStateUpdate === 4, `${listeners.voiceStateUpdate}`);
 
-  function toDate(value) {
-    if (!value) return null;
-    let str = String(value).trim();
-    if (!/[zZ]$/.test(str) && !/[+-]\d{2}:?\d{2}$/.test(str)) str += 'Z';
-    str = str.replace(' ', 'T');
-    const d = new Date(str);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
+  // usa O parser real (deixou de haver uma cópia por plugin)
+  const toDate = db.parseDbDate;
   rec('parse de datas ISO e SQLite', toDate(iso) !== null && toDate(sqliteStyle) !== null);
   rec('sorteio antigo já terminou / novo não', toDate(sqliteStyle).getTime() < Date.now() && toDate(iso).getTime() > Date.now());
+  rec('parse de datas devolve null em lixo', toDate('não é uma data') === null && toDate(null) === null);
+  sql.run('INSERT INTO xp_levels (guild_id, user_id, xp, level, last_xp_at) VALUES (?, ?, ?, ?, ?)', ['gdate', 'u-garbage', 1, 1, 'lixo']);
+  db.saveDb();
+  rec('cooldown não fica bloqueado por data ilegível', db.canGainXp('gdate', 'u-garbage', 3600) === true);
+  sql.run('DELETE FROM xp_levels WHERE guild_id = ?', ['gdate']);
 
   // ---------- Contratos UI / API / plugins ----------
   const apijs = read('src/server/api.js');
@@ -146,6 +145,9 @@ const ROOT = path.resolve(__dirname, '..');
   const core = read('src/index.js');
   const dbjs = read('src/utils/database.js');
   const readme = read('README.md');
+  const pman = read('src/utils/pluginManager.js');
+  const mod = read('plugins/moderation/index.js');
+  const amod = read('plugins/auto-mod/index.js');
 
   // Segurança / segredos
   rec('/api/plugins-ui restringe-se a ui/', apijs.includes("'/plugins-ui/:folderId/ui/:asset(*)'") && !apijs.includes('express.static(USER_PLUGINS_DIR)'));
@@ -201,6 +203,18 @@ const ROOT = path.resolve(__dirname, '..');
   rec('notificacoes: marcador offline + duracao ancorada + timeout', notif.includes('AbortSignal.timeout') && notif.includes('offline_msg=') && notif.includes('weeks?|months?|years?'));
   rec('README/plugin.json nao prometem Spotify/SoundCloud', !readme.includes('suporta YouTube, Spotify, SoundCloud') && !read('plugins/music/plugin.json').includes('YouTube, Spotify e SoundCloud'));
   rec('README: RESTORE_BODY_LIMIT documentado', readme.includes('RESTORE_BODY_LIMIT'));
+  rec('README: requisito de Node e notas de gravação/restauro', readme.includes('Node.js ≥ 22.22.2') && readme.includes('restart: unless-stopped'));
+  rec('package.json declara engines.node', (require(path.join(ROOT, 'package.json')).engines || {}).node === '>=22.22.2');
+  rec('sessão: cookie httpOnly + sameSite=lax', core.includes("httpOnly: true, sameSite: 'lax'"));
+  rec('config: password gerada com crypto.randomInt', cfg.includes('crypto.randomInt(chars.length)') && !cfg.includes('Math.floor(Math.random() * chars.length)'));
+  rec('pluginManager: git/npm com timeout', (pman.match(/timeout: \d+/g) || []).length >= 2);
+  rec('stats: nomes de canais resolvidos no servidor pedido', apiExt.includes('client.guilds.cache.get(guildId)') && !/const guild = client\.guilds\.cache\.first\(\);\n  const topChannelsNamed/.test(apiExt));
+  rec('auto-mod: convites discord.com/invite apanhados', amod.includes("discord(?:app)?\\.com\\/invite\\/"));
+  rec('BD: enterGiveaway distingue duplicado de falha', dbjs.includes('return raced ? false : null;'));
+  rec('levels-xp: Maps de servidor vazios são removidos', lvl.includes('if (timers.size === 0) voiceTimers.delete(guildId);'));
+  rec('datas: um único parser partilhado (sem cópias)', dbjs.includes('function parseDbDate') && !gw.includes('function toDate(') && !mod.includes("created_at + 'Z'") && dbjs.includes('parseDbDate,'));
+  rec('BD: data ilegível não bloqueia o cooldown de XP', dbjs.includes('if (!lastXp) return true;'));
+  rec('giveaways: falha a gravar participação não diz já participas', gw.includes('entered === null'));
 
   // Web UI navegação
   const dataTabs = [...html.matchAll(/data-tab="([^"]+)"/g)].map(m => m[1]);

@@ -333,11 +333,25 @@ function getLeaderboard(guildId, limit = 10) {
   return queryAll('SELECT * FROM xp_levels WHERE guild_id = ? ORDER BY xp DESC LIMIT ?', [guildId, limit]);
 }
 
+// As datas gravadas podem vir em ISO 8601 (com 'Z' ou desvio) ou no formato de
+// texto do SQLite ('YYYY-MM-DD HH:MM:SS', sem fuso). Juntar sempre 'Z' rebentava
+// o parse (NaN) — e um NaN no cooldown de XP bloqueava o ganho de XP para
+// sempre. Um único parser para todo o código: devolve Date ou null.
+function parseDbDate(value) {
+  if (!value) return null;
+  let str = String(value).trim();
+  if (!/[zZ]$/.test(str) && !/[+-]\d{2}:?\d{2}$/.test(str)) str += 'Z';
+  str = str.replace(' ', 'T');
+  const date = new Date(str);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function canGainXp(guildId, userId, cooldownSeconds = 60) {
   const row = queryOne('SELECT last_xp_at FROM xp_levels WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
   if (!row || !row.last_xp_at) return true;
-  const lastXp = new Date(row.last_xp_at + 'Z').getTime();
-  return (Date.now() - lastXp) > (cooldownSeconds * 1000);
+  const lastXp = parseDbDate(row.last_xp_at);
+  if (!lastXp) return true; // data ilegível: não pode bloquear o ganho para sempre
+  return (Date.now() - lastXp.getTime()) > (cooldownSeconds * 1000);
 }
 
 // --- TICKETS ---
@@ -367,7 +381,12 @@ function enterGiveaway(giveawayId, userId) {
   const existing = queryOne('SELECT id FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?', [giveawayId, userId]);
   if (existing) return false;
   const result = runSql('INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)', [giveawayId, userId]);
-  return !!result;
+  if (result) return true;
+  // Sem resultado: ou foi corrida com outro clique (UNIQUE) ou a escrita falhou.
+  // Reler distingue as duas — dizer "já participas" numa avaria da BD faria a
+  // pessoa desistir de uma participação que nunca chegou a existir.
+  const raced = queryOne('SELECT id FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?', [giveawayId, userId]);
+  return raced ? false : null;
 }
 
 function getGiveawayEntries(giveawayId) {
@@ -469,7 +488,7 @@ function pruneMemberHistory(days = 90) {
 }
 
 module.exports = {
-  getDb, saveDb, shutdownDb, abortShutdown, validateDbBuffer, initTables,
+  getDb, saveDb, shutdownDb, abortShutdown, validateDbBuffer, initTables, parseDbDate,
   addWarning, getWarnings, clearWarnings, getAllWarnings,
   addXp, addVoiceXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
   createTicket, closeTicket, getOpenTickets, getUserOpenTicket,

@@ -70,10 +70,13 @@ const defaultConfig = {
 };
 
 function generateRandomPassword(length = 12) {
+  // crypto.randomInt (não Math.random): a password gerada no primeiro arranque é
+  // a credencial do painel de administração
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()';
+  const crypto = require('crypto');
   let pass = '';
   for (let i = 0; i < length; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    pass += chars.charAt(crypto.randomInt(chars.length));
   }
   return pass;
 }

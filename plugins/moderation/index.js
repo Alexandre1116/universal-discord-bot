@@ -6,7 +6,7 @@ const path = require('path');
 const databasePath = path.join(__dirname, '..', '..', 'src', 'utils', 'database');
 const configPath = path.join(__dirname, '..', '..', 'src', 'utils', 'config');
 
-const { addWarning, getWarnings, clearWarnings } = require(databasePath);
+const { addWarning, getWarnings, clearWarnings, parseDbDate } = require(databasePath);
 const { getConfig } = require(configPath);
 
 // Comandos
@@ -220,9 +220,12 @@ async function handleWarnings(interaction) {
     return interaction.reply({ content: `✅ **${target.tag}** não tem avisos registados.`, ephemeral: true });
   }
 
-  const list = warnings.slice(0, 10).map((w, i) =>
-    `**#${i + 1}** — ${w.reason}\n<t:${Math.floor(new Date(w.created_at + 'Z').getTime() / 1000)}:R>`
-  ).join('\n\n');
+  const list = warnings.slice(0, 10).map((w, i) => {
+    const when = parseDbDate(w.created_at);
+    // sem timestamp quando a data for ilegível: o parse antigo colava 'Z' a tudo
+    // e podia produzir <t:NaN:R> (o Discord mostrava a linha partida)
+    return `**#${i + 1}** — ${w.reason}${when ? `\n<t:${Math.floor(when.getTime() / 1000)}:R>` : ''}`;
+  }).join('\n\n');
 
   const embed = new EmbedBuilder()
     .setTitle(`📋 Avisos de ${target.tag}`)

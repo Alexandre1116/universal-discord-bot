@@ -46,7 +46,7 @@ Este é o cérebro do teu plugin. O bot principal espera que este ficheiro expor
 - `commands`: Um array de `SlashCommandBuilder` (comandos de barra do Discord).
 - `events`: Um objeto com ouvintes de eventos (ex: `interactionCreate`, `messageCreate`). O primeiro argumento de cada handler é sempre o `client`; os restantes são os argumentos do evento do discord.js.
 - `init`: Uma função que será executada imediatamente quando o bot liga ou quando o plugin é carregado.
-- `routes`: (Opcional) Função que recebe o objeto do Express para registares rotas HTTP tuas (ex: `app.get('/api/meu-plugin', ...)`).
+- `routes`: (Opcional) Função que recebe o objeto do Express para registares rotas HTTP tuas (ex: `app.get('/api/meu-plugin', ...)`). **Usa o prefixo `/api/`**: o painel só exige sessão nas rotas debaixo de `/api`; qualquer rota fora dele é pública (útil de propósito para *webhooks* que se autenticam por assinatura, mas tens de ser tu a protegê-las).
 
 ### Exemplo Base do `index.js`
 
