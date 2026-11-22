@@ -26,6 +26,8 @@ function scanPluginsDir(dir, isOfficial) {
           const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
           meta.folderId = folder.name;
           meta.isOfficial = isOfficial;
+          // Plugins podem trazer a sua própria aba na Dashboard (ui/tab.html)
+          meta.hasUi = fs.existsSync(path.join(pluginPath, 'ui', 'tab.html'));
           found.push(meta);
         } catch (e) {
           console.error(`[PLUGIN MANAGER] Erro ao ler plugin.json do plugin ${folder.name}:`, e.message);
@@ -159,23 +161,28 @@ function getActivePlugins() {
 
 // Carrega a lógica dos plugins (previne carregamento duplicado)
 const loadedPlugins = new Set();
+// Guarda os comandos de cada plugin já carregado, para que possamos voltar a
+// registar os slash commands sem voltar a carregar (require) os plugins.
+const pluginCommands = new Map();
 
 function loadPlugins(client, app) {
   const activePlugins = getActivePlugins();
   let allCommands = [];
 
   for (const plugin of activePlugins) {
+    const pluginBasePath = getPluginPath(plugin.folderId);
+    if (!pluginBasePath) {
+      console.error(`[PLUGIN MANAGER] Caminho do plugin '${plugin.folderId}' não encontrado.`);
+      continue;
+    }
+
     if (loadedPlugins.has(plugin.folderId)) {
-      console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' já carregado, a saltar...`);
+      console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' já carregado, a reutilizar os seus comandos...`);
+      allCommands = allCommands.concat(pluginCommands.get(plugin.folderId) || []);
       continue;
     }
 
     try {
-      const pluginBasePath = getPluginPath(plugin.folderId);
-      if (!pluginBasePath) {
-        console.error(`[PLUGIN MANAGER] Caminho do plugin '${plugin.folderId}' não encontrado.`);
-        continue;
-      }
       const pluginPath = path.join(pluginBasePath, 'index.js');
       if (fs.existsSync(pluginPath)) {
         const logic = require(pluginPath);
@@ -194,6 +201,7 @@ function loadPlugins(client, app) {
         }
         
         if (logic.commands) {
+          pluginCommands.set(plugin.folderId, logic.commands);
           allCommands = allCommands.concat(logic.commands);
         }
 
@@ -211,12 +219,23 @@ function loadPlugins(client, app) {
   return allCommands;
 }
 
+// Devolve apenas os comandos dos plugins atualmente ativos
+function getPluginCommands() {
+  const active = new Set(getActivePlugins().map(p => p.folderId));
+  let commands = [];
+  for (const [folderId, cmds] of pluginCommands.entries()) {
+    if (active.has(folderId)) commands = commands.concat(cmds);
+  }
+  return commands;
+}
+
 function isPluginLoaded(folderId) {
   return loadedPlugins.has(folderId);
 }
 
 function clearLoadedPlugins() {
   loadedPlugins.clear();
+  pluginCommands.clear();
 }
 
 module.exports = {
@@ -225,6 +244,7 @@ module.exports = {
   getActivePlugins,
   deletePlugin,
   loadPlugins,
+  getPluginCommands,
   isPluginLoaded,
   clearLoadedPlugins,
   getPluginPath,

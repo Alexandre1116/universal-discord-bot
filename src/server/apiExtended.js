@@ -464,13 +464,25 @@ router.post('/custom-commands', (req, res) => {
 // GET /api/notifications
 router.get('/notifications', (req, res) => {
   const config = getConfig();
-  res.json(config.notifications || { youtube: [] });
+  const notifications = config.notifications || {};
+  res.json({
+    youtube: notifications.youtube || [],
+    twitch: notifications.twitch || []
+  });
 });
 
-// POST /api/notifications
+// POST /api/notifications — faz merge para não apagar a plataforma que o UI não mostra
 router.post('/notifications', (req, res) => {
-  const notifications = req.body;
-  updateConfig({ notifications });
+  const config = getConfig();
+  const current = config.notifications || {};
+  const incoming = req.body || {};
+  updateConfig({
+    notifications: {
+      ...current,
+      ...(Array.isArray(incoming.youtube) ? { youtube: incoming.youtube } : {}),
+      ...(Array.isArray(incoming.twitch) ? { twitch: incoming.twitch } : {})
+    }
+  });
   res.json({ success: true, message: 'Notificações atualizadas.' });
 });
 

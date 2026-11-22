@@ -71,13 +71,14 @@ router.get('/config', (req, res) => {
 router.post('/config', (req, res) => {
   try {
     const currentConfig = getConfig();
-    const { token, joinMessage, leaveMessage, voiceHubs } = req.body;
+    const { token, joinMessage, leaveMessage, voiceHubs, backup } = req.body;
 
     const updates = {};
 
     if (joinMessage) updates.joinMessage = { ...currentConfig.joinMessage, ...joinMessage };
     if (leaveMessage) updates.leaveMessage = { ...currentConfig.leaveMessage, ...leaveMessage };
     if (voiceHubs) updates.voiceHubs = voiceHubs;
+    if (backup) updates.backup = { ...(currentConfig.backup || {}), ...backup };
 
     if (token && token.trim() !== '' && !token.includes('••••')) {
       updates.token = token.trim();

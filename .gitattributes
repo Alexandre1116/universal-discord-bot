@@ -1,0 +1,9 @@
+# Normaliza fins de linha para evitar diffs gigantes (CRLF vs LF)
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary

@@ -1,9 +1,13 @@
 const { EmbedBuilder } = require('discord.js');
 const { getConfig } = require('../../utils/config');
+const { recordMemberCount } = require('../../utils/database');
 
 module.exports = function registerGuildMemberAdd(client) {
   client.on('guildMemberAdd', async (member) => {
     try {
+      // Alimenta o gráfico de crescimento de membros da Web UI
+      try { recordMemberCount(member.guild.id, member.guild.memberCount); } catch (e) { /* stats não podem rebentar o fluxo */ }
+
       const config = getConfig();
       const modules = config.modules || {};
       if (modules.welcome === false) return;

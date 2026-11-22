@@ -257,12 +257,11 @@ function createGiveaway(guildId, channelId, messageId, prize, winnersCount, host
 }
 
 function enterGiveaway(giveawayId, userId) {
-  try {
-    runSql('INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)', [giveawayId, userId]);
-    return true;
-  } catch {
-    return false;
-  }
+  // runSql engole erros, por isso verificamos a entrada duplicada à partida
+  const existing = queryOne('SELECT id FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?', [giveawayId, userId]);
+  if (existing) return false;
+  const result = runSql('INSERT INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)', [giveawayId, userId]);
+  return !!result;
 }
 
 function getGiveawayEntries(giveawayId) {
@@ -337,8 +336,16 @@ function recordMemberCount(guildId, count) {
 }
 
 function getMemberHistory(guildId, days = 30) {
-  const since = new Date(Date.now() - days * 86400000).toISOString();
+  // recorded_at é gravado por SQLite como 'YYYY-MM-DD HH:MM:SS', por isso o
+  // limite tem de ser comparado no mesmo formato (não em ISO 8601 com 'T'/'Z')
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
   return queryAll('SELECT member_count, recorded_at FROM member_history WHERE guild_id = ? AND recorded_at >= ? ORDER BY recorded_at', [guildId, since]);
+}
+
+// Remove registos antigos de histórico de membros para a BD não crescer sem limite
+function pruneMemberHistory(days = 90) {
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
+  return runSql('DELETE FROM member_history WHERE recorded_at < ?', [since]);
 }
 
 module.exports = {
@@ -349,5 +356,5 @@ module.exports = {
   createGiveaway, enterGiveaway, getGiveawayEntries, getActiveGiveaways, endGiveaway, getGiveawayByMessage, getGuildGiveaways,
   addScheduledMessage, getScheduledMessages, getAllScheduledMessages, deleteScheduledMessage,
   recordMessageStat, getMessageStatsByHour, getTopChannels, getMessageStatsPerDay,
-  recordMemberCount, getMemberHistory
+  recordMemberCount, getMemberHistory, pruneMemberHistory
 };

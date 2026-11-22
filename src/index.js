@@ -16,11 +16,11 @@ const { client, initBot } = require('./bot/client');
 const apiRoutes = require('./server/api');
 const apiExtendedRoutes = require('./server/apiExtended');
 const { authMiddleware, setupAuthRoutes } = require('./server/auth');
-const { getDb } = require('./utils/database');
+const { getDb, recordMemberCount, pruneMemberHistory } = require('./utils/database');
 const { getConfig, updateConfig } = require('./utils/config');
 const { loadPlugins } = require('./utils/pluginManager');
 const { startScheduledMessages } = require('./bot/services/scheduledMessages');
-const { REST, Routes } = require('discord.js');
+const { REST, Routes, Events } = require('discord.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,6 +80,16 @@ app.get('/health', (req, res) => {
 app.use('/api', apiRoutes);
 app.use('/api', apiExtendedRoutes);
 
+// Router onde os plugins instalam as suas rotas HTTP (registrado antes do
+// fallback 404 para que rotas adicionadas em tempo de execução funcionem)
+const pluginRouter = express.Router();
+app.use(pluginRouter);
+
+// Rotas de API desconhecidas devolvem JSON (em vez do HTML da SPA)
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, error: `Rota da API não encontrada: ${req.method} ${req.originalUrl}` });
+});
+
 // Registar Eventos do Bot Core
 registerGuildMemberAdd(client);
 registerGuildMemberRemove(client);
@@ -90,7 +100,7 @@ getDb().catch(err => console.error('[DB] Erro ao inicializar base de dados:', er
 
 // Carregar Plugins apenas quando o bot estiver pronto
 let pluginCommands = [];
-client.once('ready', async () => {
+client.once(Events.ClientReady, async () => {
   // Garantir que a base de dados está pronta antes de carregar plugins
   try {
     await getDb();
@@ -100,7 +110,7 @@ client.once('ready', async () => {
 
   // Carregar plugins dentro do ready para garantir que client.user está disponível
   try {
-    pluginCommands = loadPlugins(client, app);
+    pluginCommands = loadPlugins(client, pluginRouter);
   } catch (err) {
     console.error('[PLUGINS] Erro ao carregar plugins:', err);
   }
@@ -112,6 +122,21 @@ client.once('ready', async () => {
     console.error('[SCHEDULER] Erro ao iniciar agendador de mensagens:', err);
   }
 
+  // Instantâneos do número de membros (alimenta o gráfico de crescimento da Web UI)
+  try {
+    const snapshotMembers = () => {
+      for (const guild of client.guilds.cache.values()) {
+        recordMemberCount(guild.id, guild.memberCount);
+      }
+      pruneMemberHistory(90);
+    };
+    snapshotMembers();
+    cron.schedule('0 * * * *', snapshotMembers); // a cada hora
+    console.log('[STATS] Instantâneos de membros ativos (1x por hora).');
+  } catch (err) {
+    console.error('[STATS] Erro ao iniciar instantâneos de membros:', err);
+  }
+
   // Registarr slash commands
   const clientId = process.env.CLIENT_ID || getConfig().clientId || client.user.id;
   const token = process.env.DISCORD_TOKEN || getConfig().token;
@@ -120,12 +145,16 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(token);
     try {
       const commandJSONs = pluginCommands.map(c => c.toJSON ? c.toJSON() : c);
-      console.log(`[COMMANDS] A registar ${commandJSONs.length} slash commands de plugins...`);
-      await rest.put(
-        Routes.applicationCommands(clientId),
-        { body: commandJSONs }
-      );
-      console.log(`[COMMANDS] Slash commands registados com sucesso!`);
+      if (commandJSONs.length === 0) {
+        console.warn('[COMMANDS] Nenhum comando de plugin ativo — nenhum comando registado no Discord.');
+      } else {
+        console.log(`[COMMANDS] A registar ${commandJSONs.length} slash commands de plugins...`);
+        await rest.put(
+          Routes.applicationCommands(clientId),
+          { body: commandJSONs }
+        );
+        console.log(`[COMMANDS] Slash commands registados com sucesso!`);
+      }
     } catch (error) {
       console.error('[COMMANDS] Erro ao registar slash commands:', error);
     }

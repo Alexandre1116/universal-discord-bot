@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Events } = require('discord.js');
 const { getConfig } = require('../utils/config');
 
 
@@ -17,7 +17,7 @@ const client = new Client({
 
 let isBotReady = false;
 
-client.once('ready', () => {
+client.once(Events.ClientReady, () => {
   isBotReady = true;
   console.log(`[BOT] Bot ligado com sucesso como: ${client.user.tag}`);
   
