@@ -64,6 +64,7 @@ function getInstalledPlugins() {
 }
 
 function installPluginFromGithub(url) {
+  let pluginPath = null;
   try {
     // 1. Validar URL básico
     if (!url.startsWith('https://github.com/')) {
@@ -80,7 +81,7 @@ function installPluginFromGithub(url) {
       throw new Error('Nome de repositório inválido.');
     }
 
-    const pluginPath = path.join(USER_PLUGINS_DIR, repoName);
+    pluginPath = path.join(USER_PLUGINS_DIR, repoName);
 
     // 3. Clonar repositório
     if (fs.existsSync(pluginPath)) {
@@ -141,6 +142,14 @@ function installPluginFromGithub(url) {
     return { success: true, pluginId: repoName };
   } catch (error) {
     console.error(`[PLUGIN MANAGER] Falha ao instalar plugin:`, error.message);
+    // git clone pode deixar metade do repositório em disco (timeout, rede partida,
+    // repo sem LICENSE): sem limpeza, a pasta fica órfã e a nova tentativa falha
+    // com "já existe".
+    if (pluginPath && fs.existsSync(pluginPath)) {
+      try { fs.rmSync(pluginPath, { recursive: true, force: true }); } catch (err) {
+        console.error('[PLUGIN MANAGER] Não foi possível remover a instalação incompleta:', err.message);
+      }
+    }
     return { success: false, error: error.message };
   }
 }

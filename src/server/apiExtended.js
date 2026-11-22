@@ -361,7 +361,10 @@ router.post('/web-settings', (req, res) => {
 
 // GET /api/roles
 router.get('/roles', (req, res) => {
-  const guild = client.guilds.cache.first();
+  // ?guildId é opcional: com o bot em vários servidores, .first() dava sempre os
+  // cargos do mesmo servidor, independentemente do que o painel está a editar
+  const guild = (req.query.guildId && client.guilds.cache.get(req.query.guildId))
+    || client.guilds.cache.first();
   if (!guild) return res.json([]);
 
   const roles = guild.roles.cache
@@ -374,7 +377,8 @@ router.get('/roles', (req, res) => {
 
 // GET /api/categories
 router.get('/categories', (req, res) => {
-  const guild = client.guilds.cache.first();
+  const guild = (req.query.guildId && client.guilds.cache.get(req.query.guildId))
+    || client.guilds.cache.first();
   if (!guild) return res.json([]);
 
   const categories = guild.channels.cache

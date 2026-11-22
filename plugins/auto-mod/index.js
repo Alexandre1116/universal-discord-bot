@@ -95,6 +95,9 @@ const events = {
     }
 
     if (!violated && modConfig.antiLinks) {
+      // melhor esforço: apanha URLs em geral e os convites Discord mais
+      // comuns; encurtadores (dsc.gg, avort.io…) não são reconhecidos — para
+      // filtros de convite fiáveis usar o AutoMod nativo do Discord
       const urlPattern = /https?:\/\/[^\s]+|discord\.(gg|me)\/[^\s]+|discord(?:app)?\.com\/invite\/[^\s]+/gi;
       const allowedChannels = modConfig.linkAllowedChannels || [];
       if (urlPattern.test(content) && !allowedChannels.includes(message.channel.id)) {

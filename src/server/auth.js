@@ -34,7 +34,17 @@ function setupAuthRoutes(app, loginLimiter) {
       return res.status(500).json({ success: false, error: 'Credenciais não configuradas no servidor.' });
     }
 
-    if (username === config.webAuth.username && password === config.webAuth.password) {
+    // Comparação em tempo constante: `===` pára ao primeiro byte diferente e
+    // filtra informação a quem consegue medir o tempo do pedido. Os dois lados
+    // são resumidos com SHA-256 para terem sempre o mesmo comprimento.
+    const crypto = require('crypto');
+    const safeEqual = (a, b) => {
+      const ha = crypto.createHash('sha256').update(String(a ?? '')).digest();
+      const hb = crypto.createHash('sha256').update(String(b ?? '')).digest();
+      return crypto.timingSafeEqual(ha, hb);
+    };
+
+    if (safeEqual(username, config.webAuth.username) && safeEqual(password, config.webAuth.password)) {
       req.session.user = {
         username: username,
         isAdmin: true

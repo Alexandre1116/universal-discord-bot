@@ -51,6 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tabId === 'tab-giveaways') loadGiveaways();
       if (tabId === 'tab-embeds') loadScheduled();
       if (tabId === 'tab-plugins') fetchPlugins();
+      // as auto-respostas só eram relidas no arranque da página: quem abria o
+      // separador via API (ou noutro browser) ficava com a lista desactualizada
+      // e um Guardar por cima substituía o que não estava visível
+      if (tabId === 'tab-customcmds') fetchCustomCommands();
     });
   });
 
@@ -166,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchRoles() {
     try {
-      const r = await fetch('/api/roles'); serverRoles = await r.json();
+      const r = await fetch(`/api/roles${currentGuilds[0]?.id ? `?guildId=${currentGuilds[0].id}` : ''}`); serverRoles = await r.json();
       populateRoleDropdowns();
     } catch (e) { console.error(e); }
   }
@@ -204,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (d.logChannelId) setVal('ticketLogChannel', d.logChannelId);
       }, 500);
       // Categories
-      const cr = await fetch('/api/categories'); const cats = await cr.json();
+      const cr = await fetch(`/api/categories${currentGuilds[0]?.id ? `?guildId=${currentGuilds[0].id}` : ''}`); const cats = await cr.json();
       const catSel = document.getElementById('ticketCategory');
       catSel.innerHTML = '<option value="">Sem categoria</option>' + cats.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
       if (d.categoryId) catSel.value = d.categoryId;
@@ -742,7 +746,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const discordChannelId = row.querySelector('.notif-channel').value;
       const message = row.querySelector('.notif-msg').value.trim();
       const roleToPing = row.querySelector('.notif-role')?.value || '';
-      if (youtubeId && discordChannelId) youtube.push({ channelId: youtubeId, youtubeId, discordChannelId, message, roleToPing });
+      // só o formato canónico: o plugin continua a aceitar o formato antigo
+      // (channelId) para configs já gravados, mas o painel deixa de escrever os
+      // dois de uma vez, que era o que permitia à divergência voltar
+      if (youtubeId && discordChannelId) youtube.push({ youtubeId, discordChannelId, message, roleToPing });
     });
     const r = await postJson('/api/notifications', { youtube });
     showToast(r.success ? 'Notificações guardadas!' : r.error, !r.success);

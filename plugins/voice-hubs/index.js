@@ -113,26 +113,35 @@ const events = {
     const voiceHubs = config.voiceHubs || [];
     if (voiceHubs.length === 0) return;
 
-    // 1) Saiu de um canal temporário? Tratamos primeiro: antes, quando o destino
-    // era o próprio hub, o ramo do hub fazia return e o canal antigo ficava para
-    // trás (só desaparecia no cleanup de 2 minutos).
-    if (oldState.channelId && oldState.channelId !== newState.channelId) {
-      await cleanupDepartedTempChannel(newState.guild || oldState.guild, oldState.channelId);
-    }
-
-    // 2) Entrou num hub → criar canal temporário. Só conta uma mudança real de
-    // canal: eventos de mute/deafen têm o mesmo channelId e criavam canais a mais.
+    // O pedido de criação é identificado antes de qualquer await: a limpeza do
+    // canal antigo espera pelo Discord, e sem marcação prévia dois eventos
+    // quase simultâneos do mesmo membro passavam ambos o teste da trava.
     const hub = voiceHubs.find(h => h.channelId === newState.channelId);
-    if (hub && oldState.channelId !== newState.channelId) {
-      // Serializar por servidor+membro: uma saída e reentrada rápidas produziam
-      // duas criações e dois pedidos de movimento para o mesmo membro
-      const lockKey = `${newState.guild.id}:${newState.id}`;
+    const realMove = oldState.channelId !== newState.channelId;
+    // VoiceState.id é o user_id do membro (discord.js v14); é o que serve
+    // para serializar por pessoa
+    const lockKey = `${newState.guild.id}:${newState.id}`;
+    let lockHeld = false;
+    if (hub && realMove) {
       if (hubCreations.has(lockKey)) {
         console.log('[VOICE HUBS] Criação já em curso para este membro; a ignorar o segundo pedido.');
         return;
       }
       hubCreations.add(lockKey);
-      try {
+      lockHeld = true;
+    }
+
+    try {
+      // 1) Saiu de um canal temporário? Tratamos primeiro: antes, quando o destino
+      // era o próprio hub, o ramo do hub fazia return e o canal antigo ficava para
+      // trás (só desaparecia no cleanup de 2 minutos).
+      if (oldState.channelId && realMove) {
+        await cleanupDepartedTempChannel(newState.guild || oldState.guild, oldState.channelId);
+      }
+
+      // 2) Entrou num hub → criar canal temporário. Só conta uma mudança real de
+      // canal: eventos de mute/deafen têm o mesmo channelId e criavam canais a mais.
+      if (hub && lockHeld) {
         const guild = newState.guild;
         const member = newState.member;
         if (!member) return;
@@ -186,12 +195,12 @@ const events = {
         }
 
         console.log(`[VOICE HUBS] Canal temporário criado: ${tempChannel.name}`);
-      } catch (err) {
-        console.error('[VOICE HUBS] Erro ao criar canal temporário:', err.message);
-      } finally {
-        hubCreations.delete(lockKey);
       }
-      return;
+    } catch (err) {
+      console.error('[VOICE HUBS] Erro ao gerir canal temporário:', err.message);
+    } finally {
+      // Sempre libertado — também nos regressos antecipados dentro do try
+      if (lockHeld) hubCreations.delete(lockKey);
     }
   }
 };

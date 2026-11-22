@@ -86,17 +86,27 @@ function generateRandomPassword(length = 12) {
 let lastGoodConfig = null; // última leitura bem-sucedida (evita escrever predefinições por cima)
 let readFailed = false;
 
+// O logger da aplicação intercepta console.* e guarda as últimas 100 mensagens,
+// que o painel expõe em /api/logs. A password gerada não pode passar por aí:
+// vai direitamento ao stdout (o operador vê-a no terminal) sem entrar no anel.
+function printGeneratedCredentials(cfg) {
+  const banner = [
+    '==================================================',
+    '🔒 CREDENCIAIS GERADAS PARA O PAINEL WEB 🔒',
+    `👤 Username: ${cfg.webAuth.username}`,
+    `🔑 Password: ${cfg.webAuth.password}`,
+    '=================================================='
+  ].join('\n');
+  process.stdout.write(banner + '\n');
+}
+
 function getConfig() {
   try {
     let currentConfig = { ...defaultConfig };
     if (!fs.existsSync(CONFIG_PATH)) {
       currentConfig.webAuth = { username: 'admin', password: generateRandomPassword() };
       saveConfig(currentConfig);
-      console.log('==================================================');
-      console.log('🔒 CREDENCIAIS GERADAS PARA O PAINEL WEB 🔒');
-      console.log(`👤 Username: ${currentConfig.webAuth.username}`);
-      console.log(`🔑 Password: ${currentConfig.webAuth.password}`);
-      console.log('==================================================');
+      printGeneratedCredentials(currentConfig);
       lastGoodConfig = currentConfig;
       return currentConfig;
     }
@@ -113,11 +123,7 @@ function getConfig() {
     if (!currentConfig.webAuth) {
       currentConfig.webAuth = { username: 'admin', password: generateRandomPassword() };
       saveConfig(currentConfig);
-      console.log('==================================================');
-      console.log('🔒 CREDENCIAIS GERADAS PARA O PAINEL WEB 🔒');
-      console.log(`👤 Username: ${currentConfig.webAuth.username}`);
-      console.log(`🔑 Password: ${currentConfig.webAuth.password}`);
-      console.log('==================================================');
+      printGeneratedCredentials(currentConfig);
     }
     readFailed = false;
     lastGoodConfig = currentConfig;
@@ -142,6 +148,9 @@ function saveConfig(newConfig) {
     const tmpPath = `${CONFIG_PATH}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2), 'utf8');
     fs.renameSync(tmpPath, CONFIG_PATH);
+    // A cópia de segurança em memória tem de ser ESTA configuração: sem isto, o
+    // plano "gravar a última conhecida" pode repor valores antigos
+    lastGoodConfig = newConfig;
     return true;
   } catch (error) {
     console.error('Erro ao guardar config.json:', error);

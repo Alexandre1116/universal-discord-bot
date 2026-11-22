@@ -120,6 +120,10 @@ function scheduleSave() {
 
 function shutdownDb() {
   shuttingDown = true;
+  // Cancela um flush já agendado: durante o restauro o ficheiro no disco é
+  // trocado à mão, e uma gravação em atraso da BD antiga por cima disso era
+  // exactamente o tipo de corrupção que o restauro veio evitar.
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
 }
 
 // Anula um shutdown: sem isto, uma operação que falhe depois de shutdownDb deixa
