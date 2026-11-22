@@ -161,8 +161,9 @@ const ROOT = path.resolve(__dirname, '..');
   rec('BD: giveaways criado ja com winners + indice do historico', /CREATE TABLE IF NOT EXISTS giveaways \([\s\S]*?winners TEXT/.test(dbjs) && dbjs.includes('idx_member_history_guild_time'));
   rec('BD: emigracao winners via PRAGMA', dbjs.includes('PRAGMA table_info(giveaways)'));
   rec('config: atómico, le antes de decidir e recusa sem copia', cfg.includes('fs.renameSync(tmpPath, CONFIG_PATH)') && /function updateConfig\(updates\) \{[\s\S]{0,240}?const current = getConfig\(\);[\s\S]{0,300}?if \(readFailed\)/.test(cfg) && cfg.includes('config.json não contém um objeto JSON válido'));
-  rec('web: parser grande so depois da autenticacao', core.includes("app.post('/api/restore', bodyParser.json({ limit:") && core.includes("req.method === 'POST' && req.path === '/api/restore'") && core.indexOf("app.post('/api/restore'") > core.indexOf("app.use('/api', authMiddleware)"));
+  rec('web: parser grande so depois da autenticacao', core.includes("app.post('/api/restore', bodyParser.json({ limit:") && core.includes("req.method === 'POST'") && core.includes("=== '/api/restore'") && core.indexOf("app.post('/api/restore'") > core.indexOf("app.use('/api', authMiddleware)"));
   rec('web: erros de parsing viram JSON (413/400)', core.includes('entity.too.large') && core.includes('entity.parse.failed') && core.includes('RESTORE_BODY_LIMIT'));
+  rec('restore: corpo em falta e paths com maiusculas nao rebentam', apiExt.includes('req.body || {}') && core.includes("req.path.toLowerCase() === '/api/restore'"));
   rec('sem prune automatico do historico', !core.includes('pruneMemberHistory(') && core.includes('recordMemberCount'));
 
   // Web UI
