@@ -63,11 +63,18 @@ client.once(Events.ClientReady, () => {
             files.push(new AttachmentBuilder(Buffer.from(JSON.stringify(sanitized, null, 2), 'utf8'), { name: 'config.json' }));
           }
           if (fs.existsSync(path.join(DATA_DIR, 'data.db'))) {
+            // as escritas de estatísticas/XP podem estar em fila (até 2 s)
+            require('../utils/database').flushNow();
             files.push(new AttachmentBuilder(path.join(DATA_DIR, 'data.db'), { name: 'data.db' }));
           }
           
           if (files.length > 0) {
-            await channel.send({ content: `📦 **Backup Diário Automático** (${new Date().toLocaleDateString('pt-PT')})`, files });
+            // honesto sobre o alcance do anexo: a BD não é filtrada e contém os
+            // dados de TODOS os servidores onde o bot está
+            await channel.send({
+              content: `📦 **Backup Diário Automático** (${new Date().toLocaleDateString('pt-PT')})\n⚠️ O anexo \`data.db\` contém todos os dados guardados pelo bot (XP, avisos, tickets, sorteios e histórico) de **todos** os servidores — qualquer pessoa que consiga ler este canal consegue descarregá-lo.`,
+              files
+            });
             console.log('[BACKUP] Backup diário enviado com sucesso.');
           }
         }

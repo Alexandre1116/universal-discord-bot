@@ -3,7 +3,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '../../data');
-const DB_PATH = path.join(DATA_DIR, 'data.db');
+// Permitir apontar a BD para outro ficheiro: é assim que `npm run verify` corre
+// numa cópia temporária em vez de escrever na base de dados real.
+const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'data.db');
 const OLD_DB_PATH = path.join(__dirname, '../../data.db');
 
 // Assegurar que a pasta data existe
@@ -89,6 +91,33 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, buffer);
 }
 
+// O sql.js não escreve em incremental: saveDb() exporta a BD inteira. Estatísticas
+// de mensagens e XP acontecem a cada mensagem, e medir isso deu ~10 ms por escrita
+// com 1,7 MB de base de dados — tempo demasiado a bloquear o loop de eventos.
+// Essas escritas ficam em memória e vão para disco agrupadas, no máximo uma vez
+// por WRITE_BEHIND_MS. O autosave de 30 s e o fecho limpo continuam a garantir
+// o resto.
+let flushTimer = null;
+const WRITE_BEHIND_MS = 2000;
+
+function flushNow() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  saveDb();
+}
+
+function scheduleSave() {
+  if (!db || shuttingDown || flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    try {
+      saveDb();
+    } catch (err) {
+      console.error('[DB] gravação em atraso falhou (o autosave de 30 s tenta de novo):', err.message);
+    }
+  }, WRITE_BEHIND_MS);
+  if (typeof flushTimer.unref === 'function') flushTimer.unref();
+}
+
 function shutdownDb() {
   shuttingDown = true;
 }
@@ -100,11 +129,11 @@ function abortShutdown() {
 }
 
 // Auto-save a cada 30 segundos (apenas após o DB estar carregado)
-setInterval(() => { if (db) saveDb(); }, 30000);
+setInterval(() => { if (db) flushNow(); }, 30000);
 
 // Gravar DB ao fechar gracefully
-process.on('SIGINT', () => { saveDb(); process.exit(0); });
-process.on('SIGTERM', () => { saveDb(); process.exit(0); });
+process.on('SIGINT', () => { flushNow(); process.exit(0); });
+process.on('SIGTERM', () => { flushNow(); process.exit(0); });
 
 function initTables() {
   if (!db) return;
@@ -232,7 +261,13 @@ function queryOne(sql, params = []) {
   return results.length > 0 ? results[0] : null;
 }
 
-function runSql(sql, params = []) {
+// opts.delay = true → a alteração fica em memória e vai para disco no próximo
+// flush agrupado (até WRITE_BEHIND_MS). Usado só nas escritas de estatísticas e
+// XP, que acontecem a cada mensagem. persisted vale:
+//   true  → já está em disco
+//   false → ficou só em memória (a gravação em disco falhou)
+//   null  → fica em fila, será gravada no próximo flush
+function runSql(sql, params = [], opts = {}) {
   if (!db) return null;
   // Durante um restauro as escritas são recusadas ANTES de alterarem a memória:
   // caso contrário o processo parece responder sucesso e perde a operação
@@ -249,6 +284,11 @@ function runSql(sql, params = []) {
   } catch (e) {
     console.error('[DB] run error:', e.message);
     return null;
+  }
+  if (opts.delay) {
+    result.persisted = null;
+    scheduleSave();
+    return result;
   }
   try {
     saveDb();
@@ -294,7 +334,7 @@ function addXp(guildId, userId, amount) {
   if (!existing) {
     // O primeiro ganho também pode cruzar níveis — calcular em vez de gravar 0
     const firstLevel = calculateLevel(amount);
-    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages, last_xp_at) VALUES (?, ?, ?, ?, 1, datetime(\'now\'))', [guildId, userId, amount, firstLevel]);
+    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages, last_xp_at) VALUES (?, ?, ?, ?, 1, datetime(\'now\'))', [guildId, userId, amount, firstLevel], { delay: true });
     return { xp: amount, level: firstLevel, leveledUp: firstLevel > 0 };
   }
 
@@ -302,7 +342,7 @@ function addXp(guildId, userId, amount) {
   const newLevel = calculateLevel(newXp);
   const leveledUp = newLevel > existing.level;
 
-  runSql('UPDATE xp_levels SET xp = ?, level = ?, total_messages = total_messages + 1, last_xp_at = datetime(\'now\') WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId]);
+  runSql('UPDATE xp_levels SET xp = ?, level = ?, total_messages = total_messages + 1, last_xp_at = datetime(\'now\') WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId], { delay: true });
 
   return { xp: newXp, level: newLevel, leveledUp, previousLevel: existing.level };
 }
@@ -313,14 +353,14 @@ function addVoiceXp(guildId, userId, amount) {
 
   if (!existing) {
     const firstLevel = calculateLevel(amount);
-    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages) VALUES (?, ?, ?, ?, 0)', [guildId, userId, amount, firstLevel]);
+    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages) VALUES (?, ?, ?, ?, 0)', [guildId, userId, amount, firstLevel], { delay: true });
     return { xp: amount, level: firstLevel, leveledUp: firstLevel > 0 };
   }
 
   const newXp = existing.xp + amount;
   const newLevel = calculateLevel(newXp);
 
-  runSql('UPDATE xp_levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId]);
+  runSql('UPDATE xp_levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId], { delay: true });
 
   return { xp: newXp, level: newLevel, leveledUp: newLevel > existing.level, previousLevel: existing.level };
 }
@@ -438,9 +478,9 @@ function recordMessageStat(guildId, channelId, userId) {
   const existing = queryOne('SELECT id, count FROM message_stats WHERE guild_id = ? AND channel_id = ? AND user_id = ? AND hour = ? AND day = ?', [guildId, channelId, userId, hour, day]);
 
   if (existing) {
-    runSql('UPDATE message_stats SET count = count + 1 WHERE id = ?', [existing.id]);
+    runSql('UPDATE message_stats SET count = count + 1 WHERE id = ?', [existing.id], { delay: true });
   } else {
-    runSql('INSERT INTO message_stats (guild_id, channel_id, user_id, hour, day) VALUES (?, ?, ?, ?, ?)', [guildId, channelId, userId, hour, day]);
+    runSql('INSERT INTO message_stats (guild_id, channel_id, user_id, hour, day) VALUES (?, ?, ?, ?, ?)', [guildId, channelId, userId, hour, day], { delay: true });
   }
 }
 
@@ -462,7 +502,7 @@ function getMessageStatsPerDay(guildId, days = 30) {
 function recordMemberCount(guildId, count) {
   const value = Number(count);
   if (!Number.isFinite(value) || value <= 0) return null; // evita pontos falsos durante estados transitórios
-  return runSql('INSERT INTO member_history (guild_id, member_count) VALUES (?, ?)', [guildId, value]);
+  return runSql('INSERT INTO member_history (guild_id, member_count) VALUES (?, ?)', [guildId, value], { delay: true });
 }
 
 function getMemberHistory(guildId, days = 30) {
@@ -488,7 +528,7 @@ function pruneMemberHistory(days = 90) {
 }
 
 module.exports = {
-  getDb, saveDb, shutdownDb, abortShutdown, validateDbBuffer, initTables, parseDbDate,
+  getDb, saveDb, flushNow, shutdownDb, abortShutdown, validateDbBuffer, initTables, parseDbDate,
   addWarning, getWarnings, clearWarnings, getAllWarnings,
   addXp, addVoiceXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
   createTicket, closeTicket, getOpenTickets, getUserOpenTicket,

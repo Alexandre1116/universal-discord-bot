@@ -55,7 +55,8 @@ docker run -p 3000:3000 -d universal-discord-bot
 
 ### Notas de funcionamento
 
-- A base de dados (sql.js) vive em memória e é gravada em `data/data.db` de 30 em 30 segundos, e também no encerramento por `SIGINT`/`SIGTERM`. Se o processo for morto à bruta (`kill -9`, `SIGKILL`), perde-se o que estiver dentro desse intervalo.
+- A base de dados (sql.js) vive em memória e é gravada em `data/data.db`. O sql.js não escreve em incremental — cada gravação exporta a base de dados inteira — por isso as escritas são agrupadas: avisos, tickets, sorteios, agendamentos e configuração vão para disco **na hora**; XP, estatísticas de mensagens e o histórico de membros vão para disco **até ~2 s depois** (agrupados) e o *autosave* varre a cada 30 s. Um `kill -9` perde no máximo esse intervalo. Os backups (painel e anexo diário) forçam a gravação antes de ler o ficheiro.
+- O anexo diário do Discord inclui o `data.db` **sem filtrar**: contém os dados de todos os servidores onde o bot está (XP, avisos, tickets, sorteios, histórico). Escolhe um canal onde isso seja aceitável — a bot avisa isso mesmo na mensagem do backup.
 - Um restauro bem-sucedido **termina o processo** de propósito. Com o `docker-compose.yml` incluído (`restart: unless-stopped`), o contentor volta a arrancar sozinho; fora de Docker, precisas de um supervisor (systemd, pm2, etc.).
 
 ---

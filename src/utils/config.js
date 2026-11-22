@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '../../data');
-const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
+// Parceiro do DB_PATH: permite à verificação automática trabalhar numa pasta de
+// testes em vez de criar/alterar o data/config.json real
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(DATA_DIR, 'config.json');
 const OLD_CONFIG_PATH = path.join(__dirname, '../../config.json');
 
 // Assegurar que a pasta data existe

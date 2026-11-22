@@ -4,13 +4,21 @@
  *
  *   npm run verify
  *
- * AVISO: corre com o client real de discord.js (sem login) e USA A BASE DE DADOS
- * REAL em data/data.db (apaga linhas de testes nas tabelas que toca). Corre num
- * checkout limpo ou com uma cópia de segurança. Não toca em data/config.json.
+ * Corre numa pasta temporária (BD e config de teste no diretório temporário do
+ * sistema), por isso é seguro correr com uma instalação viva: nunca abre nem
+ * altera data/data.db nem data/config.json. Para verificar contra o data/ real
+ * (por exemplo para reproduzir um problema), corre com DB_PATH/CONFIG_PATH
+ * apontados explicitamente para esses ficheiros.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
+
+// Definido ANTES de qualquer require de src/ (os módulos leem o env no topo)
+const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'udb-verify-'));
+if (!process.env.DB_PATH) process.env.DB_PATH = path.join(SANDBOX, 'verify.db');
+if (!process.env.CONFIG_PATH) process.env.CONFIG_PATH = path.join(SANDBOX, 'verify-config.json');
 
 (async () => {
   const results = [];
@@ -29,6 +37,12 @@ const ROOT = path.resolve(__dirname, '..');
 
   const runMeta = db.addWarning('g1', 'u2', 'mod1', 'x');
   rec('runSql devolve changes/lastId/persisted', !!runMeta && runMeta.changes === 1 && runMeta.lastId > 0 && runMeta.persisted === true, JSON.stringify(runMeta));
+
+  const wb = db.addXp('g1', 'wb-write-behind', 5);
+  rec('XP em fila disponível em memória', wb.xp === 5 && db.getUserXp('g1', 'wb-write-behind').xp === 5, JSON.stringify(wb));
+  rec('XP em fila ainda não está no ficheiro', !fs.readFileSync(process.env.DB_PATH).includes('wb-write-behind'));
+  await new Promise(r => setTimeout(r, 2400));
+  rec('XP em fila chega ao ficheiro no flush', fs.readFileSync(process.env.DB_PATH).includes('wb-write-behind'));
 
   const big = db.addXp('g1', 'lvl1', 5000);
   const lvlRow = db.getUserXp('g1', 'lvl1');
@@ -76,13 +90,18 @@ const ROOT = path.resolve(__dirname, '..');
   db.pruneMemberHistory(30);
   rec('pruneMemberHistory (manual) so apaga o que e antigo', db.getMemberHistory('gperf', 365).length === 1 && db.getMemberHistory('g1', 90).length === 1);
 
-  // validação de binário de backup
+  const closeNoRow = db.closeTicket('canal-sem-registo-na-bd');
+  rec('closeTicket sem registo: objeto com changes 0 (não é falha)', !!closeNoRow && closeNoRow.changes === 0 && closeNoRow.persisted === true, JSON.stringify(closeNoRow));
+
+  // validação de binário de backup (usa a BD de teste acabada de criar)
   const fs2 = require('fs');
-  const dbBytes = fs2.readFileSync(path.join(ROOT, 'data/data.db'));
+  db.saveDb();
+  const dbBytes = fs2.readFileSync(process.env.DB_PATH);
   rec('validateDbBuffer aceita a BD criada pelo bot', db.validateDbBuffer(dbBytes).ok === true, JSON.stringify(db.validateDbBuffer(dbBytes)));
   const fake = Buffer.concat([Buffer.from('SQLite format 3\0', 'utf8'), Buffer.alloc(4096 - 16, 0x41)]);
   rec('validateDbBuffer rejeita cabeçalho válido + lixo', db.validateDbBuffer(fake).ok === false, JSON.stringify(db.validateDbBuffer(fake)));
   rec('validateDbBuffer devolve sempre { ok, error }', typeof db.validateDbBuffer(Buffer.alloc(0)).ok === 'boolean');
+  rec('verify escreve só na pasta de testes (nunca em data/)', process.env.DB_PATH.startsWith(SANDBOX) && process.env.CONFIG_PATH.startsWith(SANDBOX), process.env.DB_PATH);
 
   // ---------- Plugins ----------
   const { client } = require(path.join(ROOT, 'src/bot/client.js'));
@@ -212,6 +231,11 @@ const ROOT = path.resolve(__dirname, '..');
   rec('auto-mod: convites discord.com/invite apanhados', amod.includes("discord(?:app)?\\.com\\/invite\\/"));
   rec('BD: enterGiveaway distingue duplicado de falha', dbjs.includes('return raced ? false : null;'));
   rec('levels-xp: Maps de servidor vazios são removidos', lvl.includes('if (timers.size === 0) voiceTimers.delete(guildId);'));
+  rec('BD: escritas quentes (XP/estatísticas/histórico) usam write-behind', (dbjs.match(/\{ delay: true \}/g) || []).length >= 7 && dbjs.includes('function scheduleSave') && dbjs.includes('function flushNow'));
+  rec('backup do painel e o anexo diário forçam flush antes de ler', apiExt.includes('flushNow();') && clientjs.includes("require('../utils/database').flushNow()"));
+  rec('anexo diário avisa o alcance do data.db', clientjs.includes('contém todos os dados guardados pelo bot'));
+  rec('UI: logs do terminal escapados com escapeHtml', appjs.includes('escapeHtml(log.message)') && !appjs.includes("log.message.replace(/</g"));
+  rec('verify corre em sandbox (DB_PATH/CONFIG_PATH)', read('scripts/verify.js').includes('mkdtempSync') && dbjs.includes('process.env.DB_PATH') && cfg.includes('process.env.CONFIG_PATH'));
   rec('datas: um único parser partilhado (sem cópias)', dbjs.includes('function parseDbDate') && !gw.includes('function toDate(') && !mod.includes("created_at + 'Z'") && dbjs.includes('parseDbDate,'));
   rec('BD: data ilegível não bloqueia o cooldown de XP', dbjs.includes('if (!lastXp) return true;'));
   rec('giveaways: falha a gravar participação não diz já participas', gw.includes('entered === null'));

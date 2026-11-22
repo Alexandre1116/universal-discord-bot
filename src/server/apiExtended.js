@@ -388,11 +388,15 @@ router.get('/categories', (req, res) => {
 router.get('/backup', (req, res) => {
   const fs = require('fs');
   const path = require('path');
+  const { flushNow } = require('../utils/database');
   const DATA_DIR = path.join(__dirname, '../../data');
   const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
   const DB_PATH = path.join(DATA_DIR, 'data.db');
 
   try {
+    // as escritas de estatísticas/XP podem estar em fila (até 2 s): garantir que
+    // o backup apanha tudo o que o processo já aceitou
+    flushNow();
     const backup = {
       config: fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '{}',
       database: fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH).toString('base64') : ''

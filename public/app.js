@@ -1062,7 +1062,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (log.type === 'warn') color = '#e8c374';
           if (log.type === 'error') color = '#ed4245';
           const timeStr = new Date(log.time).toLocaleTimeString('pt-PT');
-          return `<div style="color: ${color}; margin-bottom: 4px;">[${timeStr}] [${log.type.toUpperCase()}] ${log.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+          return `<div style="color: ${color}; margin-bottom: 4px;">[${timeStr}] [${log.type.toUpperCase()}] ${escapeHtml(log.message)}</div>`;
         }).join('');
         // Scroll to bottom
         terminal.scrollTop = terminal.scrollHeight;
