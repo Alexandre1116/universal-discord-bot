@@ -98,7 +98,9 @@ Se o teu plugin necessitar de uma página de configurações no Painel Web (Web 
 Ao fazeres isto:
 1. O Core adiciona automaticamente um botão de menu na lateral esquerda do painel.
 2. O conteúdo do teu `tab.html` será carregado nativamente (podendo injetar ecrãs de definição diretamente na interface central).
-3. Todos os ficheiros dentro de `ui/` são servidos em `/api/plugins-ui/<nome-da-pasta>/ui/...` — usa caminhos **relativos** no HTML (ex: `<script src="script.js"></script>`), porque o `tab.html` é injetado na página principal.
+3. Todos os ficheiros dentro de `ui/` são servidos em `/api/plugins-ui/<nome-da-pasta>/ui/...` — usa caminhos **relativos** no HTML (ex: `<script src="script.js"></script>`); o painel resolve-os automaticamente contra a pasta `ui/` do teu plugin. Só é servida a pasta `ui/` — o resto do código do plugin não é exposto pelo painel.
+
+> ⚠️ **Confiança:** um plugin é código de plena confiança. O `index.js` corre no processo do bot (com acesso à base de dados, ao config e ao token) e os scripts do `ui/tab.html` correm no painel, com a sessão de administrador. Instala apenas plugins cujo código possas inspecionar — é por isso que a licença Open-Source é obrigatória.
 
 *As credenciais e lógica de gravação na interface do utilizador já partilham as classes CSS e funções globais da Dashboard padrão (como os avisos de toast).*
 

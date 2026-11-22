@@ -436,11 +436,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cmds.length) {
       container.innerHTML = '<div class="empty-state"><p>Sem auto-respostas configuradas.</p></div>';
     } else {
-      cmds.forEach(cmd => addCustomCmdRow(cmd.trigger, cmd.response, cmd.matchType));
+      cmds.forEach(cmd => addCustomCmdRow(cmd.trigger, cmd.response, cmd.matchType, cmd));
     }
   }
 
-  function addCustomCmdRow(trigger = '', response = '', matchType = 'exact') {
+  function addCustomCmdRow(trigger = '', response = '', matchType = 'exact', original = null) {
     const container = document.getElementById('customCmdsList');
     if (!container) return;
     // remover state vazio se existir
@@ -449,7 +449,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — sem o !)" value="${trigger}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${response}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    // Guarda a entrada original para não perder campos que este formulário não
+    // mostra (type/title/color dos embeds já gravados)
+    if (original) row.dataset.original = JSON.stringify(original);
+    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — sem o !)" value="${escapeHtml(trigger)}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${escapeHtml(response)}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -462,31 +465,40 @@ document.addEventListener('DOMContentLoaded', () => {
       const matchType = row.querySelector('.cmd-match').value;
       const trigger = row.querySelector('.cmd-trigger').value.trim();
       const response = row.querySelector('.cmd-response').value.trim();
-      if (trigger && response) commands.push({ trigger, response, matchType });
+      let base = {};
+      try { base = row.dataset.original ? JSON.parse(row.dataset.original) : {}; } catch (err) { base = {}; }
+      if (trigger && response) commands.push({ ...base, trigger, response, matchType });
     });
     const r = await postJson('/api/custom-commands', { commands });
     showToast(r.success ? 'Auto-respostas guardadas!' : r.error, !r.success);
   });
 
   // PLUGINS
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   function injectPluginTabs(plugins) {
     const nav = document.querySelector('.nav-menu');
     const main = document.querySelector('.main-content');
     if (!nav || !main) return;
 
-    plugins.filter(p => p.hasUi).forEach(p => {
+    // Só plugins ATIVOS com ui/tab.html recebem aba
+    plugins.filter(p => p.hasUi && p.enabled).forEach(p => {
       const tabId = `tab-plugin-${p.folderId}`;
       if (document.getElementById(tabId)) return;
+
+      const uiBase = `/api/plugins-ui/${encodeURIComponent(p.folderId)}/ui/`;
 
       const btn = document.createElement('button');
       btn.className = 'nav-item';
       btn.setAttribute('data-tab', tabId);
-      btn.innerHTML = `<i class="fa-solid fa-puzzle-piece"></i><span>${p.displayName || p.name}</span>`;
+      btn.innerHTML = `<i class="fa-solid fa-puzzle-piece"></i><span>${escapeHtml(p.displayName || p.name)}</span>`;
 
       const section = document.createElement('section');
       section.id = tabId;
       section.className = 'tab-content';
-      section.innerHTML = `<div class="content-card"><div class="card-body plugin-ui-container" data-plugin="${p.folderId}">A carregar a interface do plugin…</div></div>`;
+      section.innerHTML = `<div class="content-card"><div class="card-body plugin-ui-container" data-plugin="${escapeHtml(p.folderId)}">A carregar a interface do plugin…</div></div>`;
 
       nav.appendChild(btn);
       main.appendChild(section);
@@ -502,18 +514,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = section.querySelector('.plugin-ui-container');
         if (container.dataset.loaded === '1') return;
         try {
-          const res = await fetch(`/api/plugins-ui/${p.folderId}/ui/tab.html`);
+          const res = await fetch(`${uiBase}tab.html`);
           if (!res.ok) throw new Error(`tab.html não encontrado (HTTP ${res.status})`);
           container.innerHTML = await res.text();
           container.dataset.loaded = '1';
-          // Recria <script> para que sejam efetivamente executados
+          // Recria <script> (sozinhos não executam) e resolve caminhos
+          // relativos contra a pasta ui/ do plugin, não contra o painel
           container.querySelectorAll('script').forEach(old => {
             const fresh = document.createElement('script');
-            if (old.src) fresh.src = old.src; else fresh.textContent = old.textContent;
+            const rawSrc = old.getAttribute('src');
+            if (rawSrc) {
+              fresh.src = (/^https?:/i.test(rawSrc) || rawSrc.startsWith('/'))
+                ? rawSrc
+                : uiBase + rawSrc.replace(/^\.\/?/, '');
+            } else {
+              fresh.textContent = old.textContent;
+            }
+            if (old.type) fresh.type = old.type;
             old.replaceWith(fresh);
           });
         } catch (err) {
-          container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${err.message}</p>`;
+          container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${escapeHtml(err.message)}</p>`;
         }
       });
     });
@@ -535,19 +556,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let html = '';
       for (const p of plugins) {
+        // escapeHtml em todos os campos vindos do plugin.json (não são confiáveis)
         html += `
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h5 style="margin: 0; color: #fff;">${p.displayName || p.name} <small style="color: #aaa;">v${p.version || '1.0'}</small></h5>
-            <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${p.description || 'Sem descrição.'}</p>
-            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${p.author || 'Desconhecido'} | ID: ${p.folderId}${p.isOfficial ? ' (oficial)' : ''}</p>
+            <h5 style="margin: 0; color: #fff;">${escapeHtml(p.displayName || p.name)} <small style="color: #aaa;">v${escapeHtml(p.version || '1.0')}</small></h5>
+            <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${escapeHtml(p.description || 'Sem descrição.')}</p>
+            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${escapeHtml(p.author || 'Desconhecido')} | ID: ${escapeHtml(p.folderId)}${p.isOfficial ? ' (oficial)' : ''}</p>
           </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <label class="toggle-switch">
-              <input type="checkbox" onchange="togglePlugin('${p.folderId}', this.checked)" ${p.enabled ? 'checked' : ''}>
+              <input type="checkbox" onchange="togglePlugin('${escapeHtml(p.folderId)}', this.checked)" ${p.enabled ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
-            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.folderId}')"><i class="fa-solid fa-trash"></i></button>`}
+            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" onclick="deletePlugin('${escapeHtml(p.folderId)}')"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </div>`;
       }

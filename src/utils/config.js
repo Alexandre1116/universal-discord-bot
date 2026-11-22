@@ -113,7 +113,11 @@ function getConfig() {
 
 function saveConfig(newConfig) {
   try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2), 'utf8');
+    // Escrita atómica: escreve num temporário e troca com rename, para nunca
+    // deixar um config.json a meio (pedido de restauro/queda no meio da escrita)
+    const tmpPath = `${CONFIG_PATH}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    fs.renameSync(tmpPath, CONFIG_PATH);
     return true;
   } catch (error) {
     console.error('Erro ao guardar config.json:', error);
@@ -124,7 +128,10 @@ function saveConfig(newConfig) {
 function updateConfig(updates) {
   const current = getConfig();
   const merged = { ...current, ...updates };
-  saveConfig(merged);
+  if (!saveConfig(merged)) {
+    console.error('[CONFIG] Falha ao gravar as alterações no disco.');
+    return null;
+  }
   return merged;
 }
 

@@ -17,12 +17,22 @@ function init(client) {
       console.error('[MUSIC] @distube/youtube não está instalado — o /play não vai conseguir resolver músicas:', err.message);
     }
 
+    // O DisTube v5 usa `ffmpeg` do PATH; o pacote ffmpeg-static traz o binário e
+    // tem de ser passado explicitamente (fora do Docker, em Windows, não há ffmpeg no PATH).
+    let ffmpegPath = null;
+    try {
+      ffmpegPath = require('ffmpeg-static');
+    } catch (err) {
+      console.warn('[MUSIC] ffmpeg-static indisponível, a usar o ffmpeg do PATH.');
+    }
+
     distube = new DisTube.DisTube(client, {
       emitNewSongOnly: true,
       emitAddSongWhenCreatingQueue: false,
       emitAddListWhenCreatingQueue: false,
       savePreviousSongs: true,
       joinNewVoiceChannel: false,
+      ...(ffmpegPath ? { ffmpeg: { path: ffmpegPath } } : {}),
       plugins
     });
 
@@ -42,11 +52,15 @@ function init(client) {
       .on('addList', (queue, playlist) => {
         queue.textChannel?.send(`✅ Playlist adicionada: **${playlist.name}** com ${playlist.songs.length} músicas.`).catch(() => {});
       })
+      // No DisTube v5 o evento 'finish' é emitido mas o bot NÃO sai do canal, e
+      // 'empty' deixou de ser emitido — por isso o leave é explícito.
       .on('finish', (queue) => {
         queue.textChannel?.send('🏁 Fila terminada. A sair do canal de voz.').catch(() => {});
-      })
-      .on('empty', (queue) => {
-        queue.textChannel?.send('💤 Ninguém no canal de voz. A sair...').catch(() => {});
+        try {
+          queue.voice?.leave();
+        } catch (err) {
+          console.error('[MUSIC] Erro ao sair do canal de voz:', err.message);
+        }
       })
       .on('disconnect', (queue) => {
         queue.textChannel?.send('🔌 Desconectado do canal de voz. Fila limpa.').catch(() => {});
@@ -72,8 +86,10 @@ function init(client) {
 const commands = [
   new SlashCommandBuilder()
     .setName('play')
-    .setDescription('Toca uma música de YouTube/Spotify/SoundCloud.')
-    .addStringOption(o => o.setName('query').setDescription('URL ou termo de pesquisa').setRequired(true)),
+    // Spotify/SoundCloud precisam de extratores adicionais do DisTube que não
+    // vêm incluídos; anunciar apenas o que funciona evita promessas falsas.
+    .setDescription('Toca música do YouTube (URL ou pesquisa por texto).')
+    .addStringOption(o => o.setName('query').setDescription('URL do YouTube ou termo de pesquisa').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('pause')
@@ -108,6 +124,30 @@ const commands = [
 const MUSIC_COMMANDS = ['play', 'pause', 'resume', 'skip', 'stop', 'queue', 'nowplaying', 'volume'];
 
 const events = {
+  // No v5 o DisTube não abandona o canal quando ficam todos os ouvintes fora;
+  // sem isto o bot fica "pendurado" num canal de voz vazio.
+  voiceStateUpdate: async (client, oldState, newState) => {
+    if (!distube) return;
+    const guild = newState.guild || oldState.guild;
+    if (!guild) return;
+
+    const queue = distube.getQueue(guild.id);
+    if (!queue) return;
+
+    const channel = guild.members.me?.voice?.channel;
+    if (!channel) return;
+
+    const humans = channel.members.filter(m => !m.user.bot);
+    if (humans.size > 0) return;
+
+    queue.textChannel?.send('💤 Canal de voz vazio. A sair...').catch(() => {});
+    try {
+      queue.voice.leave();
+    } catch (err) {
+      console.error('[MUSIC] Erro ao sair de canal de voz vazio:', err.message);
+    }
+  },
+
   interactionCreate: async (client, interaction) => {
     if (!interaction.isChatInputCommand()) return;
     if (!MUSIC_COMMANDS.includes(interaction.commandName)) return;
@@ -160,14 +200,22 @@ const events = {
     switch (interaction.commandName) {
       case 'pause':
         if (queue.paused) return interaction.reply({ content: 'A música já está pausada.', ephemeral: true });
-        queue.pause();
-        await interaction.reply('⏸️ Música pausada.');
+        try {
+          await queue.pause();
+          await interaction.reply('⏸️ Música pausada.');
+        } catch (err) {
+          await interaction.reply({ content: `❌ ${String(err.message).slice(0, 150)}`, ephemeral: true });
+        }
         break;
 
       case 'resume':
         if (!queue.paused) return interaction.reply({ content: 'A música não está pausada.', ephemeral: true });
-        queue.resume();
-        await interaction.reply('▶️ Música retomada.');
+        try {
+          await queue.resume();
+          await interaction.reply('▶️ Música retomada.');
+        } catch (err) {
+          await interaction.reply({ content: `❌ ${String(err.message).slice(0, 150)}`, ephemeral: true });
+        }
         break;
 
       case 'skip':
@@ -180,8 +228,12 @@ const events = {
         break;
 
       case 'stop':
-        if (queue) queue.stop();
-        await interaction.reply('⏹️ Música parada e fila limpa.');
+        try {
+          if (queue) await queue.stop();
+          await interaction.reply('⏹️ Música parada e fila limpa.');
+        } catch (err) {
+          await interaction.reply({ content: `❌ ${String(err.message).slice(0, 150)}`, ephemeral: true });
+        }
         break;
 
       case 'queue': {

@@ -4,7 +4,7 @@ const { getConfig, updateConfig, saveConfig } = require('../utils/config');
 const { client, getBotStatus, initBot } = require('../bot/client');
 const fs = require('fs');
 const path = require('path');
-const { getInstalledPlugins, installPluginFromGithub, deletePlugin, USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR } = require('../utils/pluginManager');
+const { getInstalledPlugins, installPluginFromGithub, deletePlugin, getPluginPath } = require('../utils/pluginManager');
 
 const router = express.Router();
 
@@ -48,8 +48,27 @@ router.delete('/plugins/:id', (req, res) => {
   res.json(result);
 });
 
-// Servir ficheiros estáticos da pasta ui/ dos plugins (tab.html, script.js)
-router.use('/plugins-ui', express.static(USER_PLUGINS_DIR), express.static(OFFICIAL_PLUGINS_DIR));
+// Serve APENAS a pasta ui/ dos plugins instalados. Antes, express.static nas
+// raízes de data/plugins e plugins/ expunha index.js, plugin.json e
+// node_modules de qualquer plugin a quem tivesse sessão no painel.
+router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
+  try {
+    const base = getPluginPath(req.params.folderId);
+    if (!base) return res.status(404).json({ success: false, error: 'Plugin não encontrado.' });
+
+    const uiDir = path.resolve(base, 'ui');
+    const target = path.resolve(uiDir, req.params.asset || '');
+    if (target !== uiDir && !target.startsWith(uiDir + path.sep)) {
+      return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
+    }
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
+    }
+    res.sendFile(target);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/status - Status do bot
 router.get('/status', (req, res) => {
@@ -59,10 +78,13 @@ router.get('/status', (req, res) => {
 // GET /api/config - Configurações atuais
 router.get('/config', (req, res) => {
   const config = getConfig();
-  // Esconder token parcialmente para segurança
+  // Esconder segredos: o token mascarado e as credenciais do painel / session
+  // secret nunca saem para o browser (a cópia integral continua em /api/backup)
   const safeConfig = {
     ...config,
-    token: config.token ? `••••••••••••${config.token.slice(-4)}` : ''
+    token: config.token ? `••••••••••••${config.token.slice(-4)}` : '',
+    webAuth: config.webAuth ? { username: config.webAuth.username, password: '••••••••' } : null,
+    sessionSecret: undefined
   };
   res.json(safeConfig);
 });
@@ -83,7 +105,15 @@ router.post('/config', (req, res) => {
     if (token && token.trim() !== '' && !token.includes('••••')) {
       updates.token = token.trim();
       process.env.DISCORD_TOKEN = token.trim();
-      // Tentar reiniciar o bot com o novo token
+    }
+
+    const updated = updateConfig(updates);
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
+
+    if (updates.token) {
+      // Reinicia o bot só depois de o token estar gravado
       client.destroy().then(() => {
         initBot();
       }).catch(() => {
@@ -91,7 +121,6 @@ router.post('/config', (req, res) => {
       });
     }
 
-    const updated = updateConfig(updates);
     res.json({ success: true, config: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

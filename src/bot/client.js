@@ -52,7 +52,15 @@ client.once(Events.ClientReady, () => {
           const files = [];
           
           if (fs.existsSync(path.join(DATA_DIR, 'config.json'))) {
-            files.push(new AttachmentBuilder(path.join(DATA_DIR, 'config.json'), { name: 'config.json' }));
+            // O canal de Discord NÃO fica com segredos: token, credenciais do
+            // painel e session secret são removidos do anexo. O backup completo
+            // (com segredos) continua disponível no painel em /api/backup.
+            const sanitized = { ...currentConfig };
+            delete sanitized.token;
+            delete sanitized.webAuth;
+            delete sanitized.sessionSecret;
+            sanitized._backupNota = 'Anexo sem token/credenciais. Usa o painel (Backup & Restauro) para o backup completo.';
+            files.push(new AttachmentBuilder(Buffer.from(JSON.stringify(sanitized, null, 2), 'utf8'), { name: 'config.json' }));
           }
           if (fs.existsSync(path.join(DATA_DIR, 'data.db'))) {
             files.push(new AttachmentBuilder(path.join(DATA_DIR, 'data.db'), { name: 'data.db' }));
