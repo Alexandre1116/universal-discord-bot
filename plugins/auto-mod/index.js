@@ -7,6 +7,17 @@ const SPAM_THRESHOLD = 5;
 
 function init(client) {
   console.log('[AUTO-MOD] Plugin inicializado.');
+
+  // o spamTracker ganha uma entrada por pessoa que fala; sem varrer, fica tudo
+  // cá desde o arranque. A janela é de segundos, por isso o que está fora dela
+  // pode ir fora.
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const [key, stamps] of spamTracker.entries()) {
+      if (!stamps.length || now - stamps[stamps.length - 1] > SPAM_WINDOW) spamTracker.delete(key);
+    }
+  }, 60000);
+  if (typeof sweep.unref === 'function') sweep.unref();
 }
 
 function isStaff(member) {

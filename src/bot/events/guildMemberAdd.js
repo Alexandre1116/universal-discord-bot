@@ -6,7 +6,9 @@ module.exports = function registerGuildMemberAdd(client) {
   client.on('guildMemberAdd', async (member) => {
     try {
       // Alimenta o gráfico de crescimento de membros da Web UI
-      try { recordMemberCount(member.guild.id, member.guild.memberCount); } catch (e) { /* stats não podem rebentar o fluxo */ }
+      // stats não podem rebentar o fluxo de entrada, mas também não podem
+      // desaparecer em silêncio
+      try { recordMemberCount(member.guild.id, member.guild.memberCount); } catch (e) { console.warn('[STATS] Instantâneo de membros (entrada) falhou:', e.message); }
 
       const config = getConfig();
       const modules = config.modules || {};

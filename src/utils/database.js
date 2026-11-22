@@ -509,6 +509,8 @@ function recordMemberCount(guildId, count) {
   return runSql('INSERT INTO member_history (guild_id, member_count) VALUES (?, ?)', [guildId, value], { delay: true });
 }
 
+// Quatro parâmetros para dois valores: o filtro do intervalo aparece na query
+// exterior e na subquery (o sql.js não tem parâmetros nomeados — a ordem importa)
 function getMemberHistory(guildId, days = 30) {
   // recorded_at é gravado por SQLite como 'YYYY-MM-DD HH:MM:SS', por isso o
   // limite tem de ser comparado no mesmo formato (não em ISO 8601 com 'T'/'Z')

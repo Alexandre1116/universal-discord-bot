@@ -89,7 +89,7 @@ function installPluginFromGithub(url) {
     }
 
     console.log(`[PLUGIN MANAGER] A clonar repositório: ${url}`);
-    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit', timeout: 120000 });
+    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit', timeout: 300000 });
 
     // 4. Validar Licença Open-Source
     const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
@@ -160,7 +160,12 @@ function deletePlugin(pluginId) {
     if (!pluginPath) {
       return { success: false, error: 'Plugin não encontrado' };
     }
-    if (fs.existsSync(path.join(OFFICIAL_PLUGINS_DIR, pluginId, 'plugin.json'))) {
+    // O teste é pelo caminho RESOLVIDO: com um plugin de utilizador a
+    // sobrepor-se a um oficial (mesmo folderId), o caminho é o do utilizador e
+    // apagar isso é legítimo — antes ficava impossível de remover.
+    const resolved = path.resolve(pluginPath);
+    const officialRoot = path.resolve(OFFICIAL_PLUGINS_DIR);
+    if (resolved === officialRoot || resolved.startsWith(officialRoot + path.sep)) {
       return { success: false, error: 'Plugins oficiais não podem ser removidos.' };
     }
     fs.rmSync(pluginPath, { recursive: true, force: true });

@@ -245,6 +245,11 @@ if (!process.env.CONFIG_PATH) process.env.CONFIG_PATH = path.join(SANDBOX, 'veri
   rec('UI: pedidos de cargos/categorias usam o servidor mostrado', appjs.includes('?guildId='));
   rec('UI: notificações gravam só o formato canónico', !appjs.includes('channelId: youtubeId, youtubeId'));
   rec('voice-hubs: trava tomada antes do await de limpeza', hubs.includes('lockHeld') && hubs.indexOf('hubCreations.add(lockKey)') < hubs.indexOf('await cleanupDepartedTempChannel'));
+  rec('pluginManager: apagar usa o caminho resolvido (shadow oficial ok)', pman.includes('path.resolve(pluginPath)') && pman.includes('officialRoot'));
+  rec('scheduler: ronda isolada em try/catch', /setInterval\(\(\) => \{[\s\S]{0,200}refreshScheduledMessages\(client\)/.test(read('src/bot/services/scheduledMessages.js')));
+  rec('auto-mod: spamTracker varrido periodicamente', amod.includes('spamTracker.delete(key)') && amod.includes('const sweep = setInterval'));
+  rec('pluginManager: subprocessos com timeout generoso', (pman.match(/timeout: 300000/g) || []).length >= 2);
+  rec('eventos de entrada/saída não engolem falhas de stats em silêncio', read('src/bot/events/guildMemberAdd.js').includes('[STATS] Instantâneo de membros (entrada) falhou') && read('src/bot/events/guildMemberRemove.js').includes('[STATS] Instantâneo de membros (saída) falhou'));
   rec('UI: auto-respostas recarregam ao abrir o separador', appjs.includes("if (tabId === 'tab-customcmds') fetchCustomCommands();"));
   rec('auto-mod/plugin.json sem gralha no displayName', JSON.parse(read('plugins/auto-mod/plugin.json')).displayName === 'Auto-Moderação');
   rec('credenciais geradas não entram no anel de logs', /function printGeneratedCredentials[\s\S]{0,400}process\.stdout\.write/.test(cfg) && !cfg.includes("console.log(`🔑 Password"));

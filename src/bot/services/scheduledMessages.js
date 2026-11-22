@@ -6,7 +6,15 @@ const activeJobs = new Map();
 
 function startScheduledMessages(client) {
   refreshScheduledMessages(client);
-  setInterval(() => refreshScheduledMessages(client), 60000);
+  // uma exceção aqui matava o agendador (e, com unhandled rejections a lançar,
+  // o processo inteiro): cada ronda é isolada
+  setInterval(() => {
+    try {
+      refreshScheduledMessages(client);
+    } catch (err) {
+      console.error('[SCHEDULER] Falha ao atualizar agendamentos:', err.message);
+    }
+  }, 60000);
   console.log('[SCHEDULER] Agendador de mensagens iniciado.');
 }
 
