@@ -1,7 +1,5 @@
 const { REST, Routes } = require('discord.js');
-const { getConfig } = require('../../utils/config');
-const { loadPlugins, getPluginCommands } = require('../../utils/pluginManager');
-const { client } = require('../client');
+const { getPluginCommands } = require('../../utils/pluginManager');
 
 /**
  * Regista os slash commands de todos os plugins ativos no Discord.
@@ -11,14 +9,12 @@ const { client } = require('../client');
 async function registerCommands(clientId, token) {
   const rest = new REST({ version: '10' }).setToken(token);
 
-  // Garante que os plugins estão carregados; os comandos dos plugins já
-  // carregados são relidos do cache (se não, enviar uma lista vazia apagava
-  // todos os comandos registados no Discord).
-  loadPlugins(client, null);
+  // Lê os comandos dos plugins já carregados pelo arranque. Não volta a chamar
+  // loadPlugins: essa via carregaria eventos e plugins sem router de rotas.
   const pluginCommands = getPluginCommands();
 
   if (pluginCommands.length === 0) {
-    throw new Error('Nenhum comando de plugin encontrado. Nenhum comando foi alterado no Discord.');
+    throw new Error('Nenhum comando de plugin encontrado. Nenhum comando foi alterado no Discord (arranca o bot ou ativa plugins primeiro).');
   }
 
   const commandJSONs = pluginCommands.map(c => (c.toJSON ? c.toJSON() : c));

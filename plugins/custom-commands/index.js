@@ -35,10 +35,13 @@ const events = {
     const contentNoPrefix = stripPrefix(content);
 
     for (const cmd of customCommands) {
-      const trigger = stripPrefix(cmd.trigger);
-      if (!trigger || !cmd.response) continue;
+      if (!cmd.trigger || !cmd.response) continue;
 
       const matchType = cmd.matchType || 'exact';
+      // Para regex usa-se o padrão TAL COMO foi gravado: tirar o prefixo
+      // corrompia padrões como ".*promo" ou "!help|?ajuda".
+      const trigger = matchType === 'regex' ? String(cmd.trigger).trim() : stripPrefix(cmd.trigger);
+      if (!trigger) continue;
       let matched = false;
 
       try {

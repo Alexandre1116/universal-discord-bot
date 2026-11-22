@@ -14,21 +14,26 @@ function indexFromConfig() {
   }
 }
 
-function persist(guildId) {
-  const stored = (getConfig().tempChannels || []).filter(c => c.guildId !== guildId);
-  updateConfig({ tempChannels: [...stored, ...(tempChannels.get(guildId) || [])] });
+// O mapa em memória é a fonte de verdade das entradas: evita o read-modify-write
+// de config.json, que podia perder entradas de outros servidores quando duas
+// escritas se entrelaçavam
+function persist() {
+  const all = [];
+  for (const list of tempChannels.values()) all.push(...list);
+  const saved = updateConfig({ tempChannels: all });
+  if (!saved) console.error('[VOICE HUBS] Falha ao persistir canais temporários no config.json.');
 }
 
 function remember(guildId, entry) {
   if (!tempChannels.has(guildId)) tempChannels.set(guildId, []);
   tempChannels.get(guildId).push(entry);
-  persist(guildId);
+  persist();
 }
 
 function forget(guildId, channelId) {
   const list = tempChannels.get(guildId) || [];
   tempChannels.set(guildId, list.filter(c => c.channelId !== channelId));
-  persist(guildId);
+  persist();
 }
 
 function init(client) {
@@ -40,19 +45,25 @@ function init(client) {
     for (const [guildId, entries] of [...tempChannels.entries()]) {
       const guild = client.guilds.cache.get(guildId);
       for (const entry of [...entries]) {
-        if (!guild) {
-          forget(guildId, entry.channelId);
-          continue;
-        }
-        const channel = guild.channels.cache.get(entry.channelId);
+        // Servidor fora de cache pode ser transitório: manter o registo
+        if (!guild) continue;
+
+        let channel = guild.channels.cache.get(entry.channelId);
         if (!channel) {
-          forget(guildId, entry.channelId);
-          continue;
+          try {
+            channel = await guild.channels.fetch(entry.channelId);
+          } catch (err) {
+            // 10003 = Unknown Channel → mesmo assim o canal já não existe
+            if (err.code === 10003) forget(guildId, entry.channelId);
+            continue;
+          }
         }
-        if (channel.members.size === 0) {
+
+        if (channel && channel.members.size === 0) {
           try {
             await channel.delete('Canal temporário vazio.');
             forget(guildId, entry.channelId);
+            console.log(`[VOICE HUBS] Canal temporário órfão removido: ${entry.channelId}`);
           } catch (err) {
             console.error('[VOICE HUBS] Erro ao remover canal órfão:', err.message);
           }
@@ -86,17 +97,13 @@ const events = {
           type: ChannelType.GuildVoice,
           parent: sourceChannel?.parentId ?? newState.channel?.parentId ?? null,
           userLimit: hub.userLimit || 0,
-          bitrate: sourceChannel?.bitrate,
+          ...(sourceChannel?.bitrate ? { bitrate: sourceChannel.bitrate } : {}),
           reason: `Canal temporário de ${member.user.tag}`
         });
 
-        await tempChannel.permissionOverwrites.create(member, {
-          ManageChannels: true,
-          MoveMembers: true
-        });
-
-        await member.voice.setChannel(tempChannel);
-
+        // Regista JÁ o canal: se um dos passos seguintes falhar (por exemplo o
+        // membro ter saído entretanto), o canal continua a ser conhecido e o
+        // cleanup periódico apaga-o em vez de o deixar órfão.
         remember(guild.id, {
           channelId: tempChannel.id,
           ownerId: member.id,
@@ -104,6 +111,16 @@ const events = {
           guildId: guild.id,
           createdAt: new Date().toISOString()
         });
+
+        try {
+          await tempChannel.permissionOverwrites.create(member, {
+            ManageChannels: true,
+            MoveMembers: true
+          });
+          await member.voice.setChannel(tempChannel);
+        } catch (stepErr) {
+          console.error('[VOICE HUBS] Falha ao configurar/mover para o canal temporário:', stepErr.message);
+        }
 
         console.log(`[VOICE HUBS] Canal temporário criado: ${tempChannel.name}`);
       } catch (err) {

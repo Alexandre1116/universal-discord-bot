@@ -31,16 +31,20 @@ function parseDuration(value, fallbackMs = 24 * 60 * 60 * 1000) {
   return fallbackMs;
 }
 
+// Devolve o que foi APLICADO, ou null quando o bot não tem permissões para tal
+// (não anuncio uma sanção que não aconteceu)
 async function applyStrikeAction(member, modConfig, reason) {
   const action = modConfig.strikeAction || 'mute';
 
   if (action === 'kick') {
-    if (member.kickable) await member.kick(reason);
+    if (!member.kickable) return null;
+    await member.kick(reason);
     return 'expulso';
   }
 
   if (action === 'ban') {
-    if (member.bannable) await member.ban({ reason });
+    if (!member.bannable) return null;
+    await member.ban({ reason });
     return 'banido';
   }
 
@@ -50,14 +54,14 @@ async function applyStrikeAction(member, modConfig, reason) {
     return 'silenciado';
   }
 
-  // fallback: cargo "Muted" com overwrites no canal
+  // fallback: cargo "Muted" gerido manualmente
   const muteRole = member.guild.roles.cache.find(r => r.name === 'Muted');
   if (muteRole && !member.roles.cache.has(muteRole.id)) {
     await member.roles.add(muteRole);
     return 'silenciado (cargo Muted)';
   }
 
-  return 'punido (sem permissão para aplicar a ação)';
+  return null;
 }
 
 const events = {
@@ -134,7 +138,10 @@ const events = {
 
       if (warnings.length >= maxStrikes) {
         const outcome = await applyStrikeAction(member, modConfig, reason);
-        await message.channel.send({ content: `⚠️ <@${message.author.id}> foi **${outcome}** por atingir o limite de avisos (${warnings.length}/${maxStrikes}).` })
+        const text = outcome
+          ? `⚠️ <@${message.author.id}> foi **${outcome}** por atingir o limite de avisos (${warnings.length}/${maxStrikes}).`
+          : `⚠️ <@${message.author.id}> atingiu o limite de avisos (${warnings.length}/${maxStrikes}), mas não tenho permissões para aplicar a punição configurada.`;
+        await message.channel.send({ content: text })
           .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
           .catch(() => {});
       } else {

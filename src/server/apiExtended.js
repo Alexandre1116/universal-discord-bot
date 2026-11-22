@@ -432,14 +432,19 @@ router.post('/restore', (req, res) => {
 router.post('/commands/register', async (req, res) => {
   const { registerCommands } = require('../bot/commands/register');
   const config = getConfig();
-  
-  if (!client.user || !config.token) {
+
+  // Mesma resolução de credenciais usada no arranque (senão um DISCORD_TOKEN de
+  // ambiente era ignorado e o registo falhava com o token do config)
+  const clientId = process.env.CLIENT_ID || config.clientId || client.user?.id;
+  const token = process.env.DISCORD_TOKEN || config.token;
+
+  if (!client.user || !clientId || !token) {
     return res.status(400).json({ success: false, error: 'O bot não está online ou falta o token.' });
   }
 
   try {
-    await registerCommands(client.user.id, config.token);
-    res.json({ success: true, message: 'Comandos Slash registados com sucesso!' });
+    const result = await registerCommands(clientId, token);
+    res.json({ success: true, message: `Comandos Slash registados com sucesso! (${result.registered})` });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

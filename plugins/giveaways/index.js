@@ -8,6 +8,11 @@ function init(client) {
   setInterval(() => checkActiveGiveaways(client), 15000);
 }
 
+// Evita duas finalizações em simultâneo (o setInterval pode sobrepor-se a um
+// finishGiveaway lento à espera do Discord)
+const checking = { active: false };
+const finishing = new Set();
+
 // As datas podem vir em ISO 8601 (com 'Z') ou no formato de texto do SQLite
 // ('YYYY-MM-DD HH:MM:SS', sem fuso). Juntar sempre 'Z' rebentava o parse (NaN),
 // por isso só acrescentamos o fuso quando ele não existe.
@@ -21,21 +26,33 @@ function toDate(value) {
 }
 
 async function checkActiveGiveaways(client) {
-  const active = getActiveGiveaways();
-  for (const gw of active) {
-    const endsAt = toDate(gw.ends_at);
-    if (!endsAt) {
-      console.warn(`[GIVEAWAYS] Data de término inválida no sorteio ${gw.id}: ${gw.ends_at}`);
-      endGiveaway(gw.id);
-      continue;
+  if (checking.active) return;
+  checking.active = true;
+  try {
+    const active = getActiveGiveaways();
+    for (const gw of active) {
+      if (finishing.has(gw.id)) continue;
+      const endsAt = toDate(gw.ends_at);
+      if (!endsAt) {
+        console.warn(`[GIVEAWAYS] Data de término inválida no sorteio ${gw.id}: ${gw.ends_at}`);
+        endGiveaway(gw.id);
+        continue;
+      }
+      if (Date.now() >= endsAt.getTime()) {
+        await finishGiveaway(client, gw);
+      }
     }
-    if (Date.now() >= endsAt.getTime()) {
-      await finishGiveaway(client, gw);
-    }
+  } finally {
+    checking.active = false;
   }
 }
 
 async function finishGiveaway(client, gw) {
+  if (finishing.has(gw.id)) return;
+  finishing.add(gw.id);
+  // Marca como terminado logo no início: se o envio falhar, o sorteio não é
+  // re-processado 15s depois com vencedores diferentes.
+  endGiveaway(gw.id);
   try {
     const entries = getGiveawayEntries(gw.id);
     const winners = [];
@@ -46,7 +63,6 @@ async function finishGiveaway(client, gw) {
       if (channel && channel.isTextBased()) {
         await channel.send({ content: `🎁 O sorteio de **${gw.prize}** terminou sem participantes.` });
       }
-      endGiveaway(gw.id);
       return;
     }
 
@@ -58,7 +74,7 @@ async function finishGiveaway(client, gw) {
 
     const channel = await client.channels.fetch(gw.channel_id).catch(() => null);
     if (!channel || !channel.isTextBased()) {
-      endGiveaway(gw.id);
+      console.warn(`[GIVEAWAYS] Canal ${gw.channel_id} indisponível; vencedores não anunciados: ${winners.join(', ')}`);
       return;
     }
 
@@ -75,11 +91,16 @@ async function finishGiveaway(client, gw) {
       console.error('[GIVEAWAYS] Erro ao editar mensagem do sorteio:', e.message);
     }
 
-    await channel.send({ content: `🎉 ${winners.map(w => `<@${w}>`).join(', ')} ganharam o sorteio de **${gw.prize}**! Parabéns!` });
-    endGiveaway(gw.id);
-    console.log(`[GIVEAWAYS] Sorteio ${gw.id} terminado. Vencedores: ${winners.join(', ')}`);
+    try {
+      await channel.send({ content: `🎉 ${winners.map(w => `<@${w}>`).join(', ')} ganharam o sorteio de **${gw.prize}**! Parabéns!` });
+      console.log(`[GIVEAWAYS] Sorteio ${gw.id} terminado. Vencedores: ${winners.join(', ')}`);
+    } catch (sendErr) {
+      console.error(`[GIVEAWAYS] Sorteio ${gw.id} encerrado mas sem anunciar (${sendErr.message}). Vencedores: ${winners.join(', ')}`);
+    }
   } catch (err) {
     console.error('[GIVEAWAYS] Erro ao terminar sorteio:', err.message);
+  } finally {
+    finishing.delete(gw.id);
   }
 }
 
@@ -88,9 +109,12 @@ const commands = [
     .setName('giveaway')
     .setDescription('Inicia um novo sorteio.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    // NOTA: as opções obrigatórias têem de vir antes das opcionais — o Discord
+    // rejeita o registo (50035) se houver uma obrigatória depois de uma opcional,
+    // o que rebentava o PUT global de todos os comandos.
     .addStringOption(o => o.setName('prize').setDescription('Prémio do sorteio').setRequired(true))
-    .addIntegerOption(o => o.setName('winners').setDescription('Número de vencedores').setMinValue(1).setMaxValue(20))
     .addIntegerOption(o => o.setName('duration').setDescription('Duração em minutos').setMinValue(1).setRequired(true))
+    .addIntegerOption(o => o.setName('winners').setDescription('Número de vencedores').setMinValue(1).setMaxValue(20))
 ];
 
 const events = {

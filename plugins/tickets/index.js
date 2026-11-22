@@ -1,18 +1,22 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 const { getConfig } = require('../../src/utils/config');
-const { createTicket, closeTicket, getUserOpenTicket } = require('../../src/utils/database');
+const { createTicket, closeTicket, getUserOpenTicket, getOpenTickets } = require('../../src/utils/database');
 
 function init(client) {
   console.log('[TICKETS] Plugin inicializado.');
 }
 
-// Envia a transcrição do ticket para o canal de logs configurado
-async function sendTranscript(guild, channel, ticketsConfig) {
-  if (!ticketsConfig.logChannelId) return;
+// Envia a transcrição do ticket para o canal de logs configurado.
+// Devolve true (enviado), false (configurado mas falhou) ou null (não configurado).
+async function sendTranscript(guild, channel, ticketsConfig, closedBy) {
+  if (!ticketsConfig.logChannelId) return null;
 
   const logChannel = guild.channels.cache.get(ticketsConfig.logChannelId) ||
     await guild.channels.fetch(ticketsConfig.logChannelId).catch(() => null);
-  if (!logChannel || !logChannel.isTextBased()) return;
+  if (!logChannel || !logChannel.isTextBased()) {
+    console.error('[TICKETS] Canal de logs configurado não existe/não é de texto; transcrição não enviada.');
+    return false;
+  }
 
   try {
     const messages = await channel.messages.fetch({ limit: 100 });
@@ -21,18 +25,21 @@ async function sendTranscript(guild, channel, ticketsConfig) {
       .map(m => `[${m.createdAt.toISOString()}] ${m.author?.tag ?? 'desconhecido'}: ${m.content || '*sem texto*'}`);
 
     const text = lines.join('\n') || 'Ticket sem mensagens.';
-    const attachment = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `${channel.name}-transcript.txt` });
+    const safeName = (channel.name || 'ticket').replace(/[^a-z0-9-]/gi, '_');
+    const attachment = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `${safeName}-transcript.txt` });
 
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
       .setTitle('🎫 Ticket Fechado')
-      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens).`)
-      .setFooter({ text: `Fechado por ${guild.client?.user?.tag ?? 'bot'}` })
+      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens${lines.length >= 100 ? ', apenas as últimas 100' : ''}).`)
+      .setFooter({ text: `Fechado por ${closedBy?.tag ?? 'desconhecido'}` })
       .setTimestamp();
 
     await logChannel.send({ embeds: [embed], files: [attachment] });
+    return true;
   } catch (err) {
     console.error('[TICKETS] Erro ao enviar transcrição:', err.message);
+    return false;
   }
 }
 
@@ -77,12 +84,29 @@ const events = {
         return interaction.reply({ content: 'Este comando só pode ser usado num canal de ticket.', ephemeral: true });
       }
 
+      // Só o autor do ticket ou a equipa de suporte o pode fechar
+      const ticket = getOpenTickets(interaction.guild.id).find(t => t.channel_id === interaction.channel.id);
+      const isSupport = interaction.member.permissions.has(PermissionFlagsBits.ManageChannels) ||
+        (ticketsConfig.supportRoleId && interaction.member.roles.cache.has(ticketsConfig.supportRoleId));
+      if (ticket && ticket.user_id !== interaction.user.id && !isSupport) {
+        return interaction.reply({ content: 'Apenas quem abriu o ticket (ou a equipa de suporte) o pode fechar.', ephemeral: true });
+      }
+
       try {
         closeTicket(interaction.channel.id);
         await interaction.reply('🔒 A fechar este ticket em 5 segundos...');
 
-        const ticketsCfg = config.tickets || {};
-        await sendTranscript(interaction.guild, interaction.channel, ticketsCfg);
+        const transcript = await sendTranscript(interaction.guild, interaction.channel, ticketsConfig, interaction.user);
+
+        // Se a transcrição estava configurada e falhou, NÃO apagamos o canal:
+        // era a única cópia do conteúdo do ticket.
+        if (transcript === false) {
+          await interaction.followUp({
+            content: '⚠️ Não consegui enviar a transcrição para o canal de logs. O canal do ticket **não foi apagado** para não perder o conteúdo — corrige o canal de logs e volta a tentar.',
+            ephemeral: true
+          });
+          return;
+        }
 
         setTimeout(async () => {
           try {

@@ -100,6 +100,7 @@ getDb().catch(err => console.error('[DB] Erro ao inicializar base de dados:', er
 
 // Carregar Plugins apenas quando o bot estiver pronto
 let pluginCommands = [];
+let memberSnapshotsStarted = false; // evita registar o cron duas vezes num reconnect
 client.once(Events.ClientReady, async () => {
   // Garantir que a base de dados está pronta antes de carregar plugins
   try {
@@ -123,18 +124,21 @@ client.once(Events.ClientReady, async () => {
   }
 
   // Instantâneos do número de membros (alimenta o gráfico de crescimento da Web UI)
-  try {
-    const snapshotMembers = () => {
-      for (const guild of client.guilds.cache.values()) {
-        recordMemberCount(guild.id, guild.memberCount);
-      }
-      pruneMemberHistory(90);
-    };
-    snapshotMembers();
-    cron.schedule('0 * * * *', snapshotMembers); // a cada hora
-    console.log('[STATS] Instantâneos de membros ativos (1x por hora).');
-  } catch (err) {
-    console.error('[STATS] Erro ao iniciar instantâneos de membros:', err);
+  if (!memberSnapshotsStarted) {
+    memberSnapshotsStarted = true;
+    try {
+      const snapshotMembers = () => {
+        for (const guild of client.guilds.cache.values()) {
+          recordMemberCount(guild.id, guild.memberCount);
+        }
+        pruneMemberHistory(90);
+      };
+      snapshotMembers();
+      cron.schedule('0 * * * *', snapshotMembers); // a cada hora
+      console.log('[STATS] Instantâneos de membros ativos (1x por hora).');
+    } catch (err) {
+      console.error('[STATS] Erro ao iniciar instantâneos de membros:', err);
+    }
   }
 
   // Registarr slash commands

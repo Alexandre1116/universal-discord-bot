@@ -168,8 +168,11 @@ function runSql(sql, params = []) {
   if (!db) return null;
   try {
     db.run(sql, params);
+    // db.export() (dentro de saveDb) repõe o estado da ligação, por isso as
+    // métricas têem de ser lidas ANTES de gravar em disco
+    const result = { changes: db.getRowsModified(), lastId: queryOne('SELECT last_insert_rowid() as id')?.id };
     saveDb();
-    return { changes: db.getRowsModified(), lastId: queryOne('SELECT last_insert_rowid() as id')?.id };
+    return result;
   } catch (e) {
     console.error('[DB] run error:', e.message);
     return null;
@@ -217,6 +220,23 @@ function addXp(guildId, userId, amount) {
   runSql('UPDATE xp_levels SET xp = ?, level = ?, total_messages = total_messages + 1, last_xp_at = datetime(\'now\') WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId]);
 
   return { xp: newXp, level: newLevel, leveledUp, previousLevel: existing.level };
+}
+
+// XP de voz: não conta como mensagem nem consome o cooldown de XP por mensagem
+function addVoiceXp(guildId, userId, amount) {
+  const existing = queryOne('SELECT * FROM xp_levels WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+
+  if (!existing) {
+    runSql('INSERT INTO xp_levels (guild_id, user_id, xp, level, total_messages) VALUES (?, ?, ?, 0, 0)', [guildId, userId, amount]);
+    return { xp: amount, level: 0, leveledUp: false };
+  }
+
+  const newXp = existing.xp + amount;
+  const newLevel = calculateLevel(newXp);
+
+  runSql('UPDATE xp_levels SET xp = ?, level = ? WHERE guild_id = ? AND user_id = ?', [newXp, newLevel, guildId, userId]);
+
+  return { xp: newXp, level: newLevel, leveledUp: newLevel > existing.level, previousLevel: existing.level };
 }
 
 function getUserXp(guildId, userId) {
@@ -332,14 +352,18 @@ function getMessageStatsPerDay(guildId, days = 30) {
 }
 
 function recordMemberCount(guildId, count) {
-  runSql('INSERT INTO member_history (guild_id, member_count) VALUES (?, ?)', [guildId, count]);
+  const value = Number(count);
+  if (!Number.isFinite(value) || value <= 0) return null; // evita pontos falsos durante estados transitórios
+  return runSql('INSERT INTO member_history (guild_id, member_count) VALUES (?, ?)', [guildId, value]);
 }
 
 function getMemberHistory(guildId, days = 30) {
   // recorded_at é gravado por SQLite como 'YYYY-MM-DD HH:MM:SS', por isso o
   // limite tem de ser comparado no mesmo formato (não em ISO 8601 com 'T'/'Z')
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10) + ' 00:00:00';
-  return queryAll('SELECT member_count, recorded_at FROM member_history WHERE guild_id = ? AND recorded_at >= ? ORDER BY recorded_at', [guildId, since]);
+  // Um ponto por dia (o máximo desse dia): a Web UI mostra rótulos MM-DD e
+  // instantâneos horários repetiriam o mesmo rótulo dezenas de vezes
+  return queryAll('SELECT DATE(recorded_at) as recorded_at, MAX(member_count) as member_count FROM member_history WHERE guild_id = ? AND recorded_at >= ? GROUP BY DATE(recorded_at) ORDER BY recorded_at', [guildId, since]);
 }
 
 // Remove registos antigos de histórico de membros para a BD não crescer sem limite
@@ -351,7 +375,7 @@ function pruneMemberHistory(days = 90) {
 module.exports = {
   getDb, saveDb, shutdownDb, initTables,
   addWarning, getWarnings, clearWarnings, getAllWarnings,
-  addXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
+  addXp, addVoiceXp, calculateLevel, xpForLevel, getUserXp, getLeaderboard, canGainXp,
   createTicket, closeTicket, getOpenTickets, getUserOpenTicket,
   createGiveaway, enterGiveaway, getGiveawayEntries, getActiveGiveaways, endGiveaway, getGiveawayByMessage, getGuildGiveaways,
   addScheduledMessage, getScheduledMessages, getAllScheduledMessages, deleteScheduledMessage,
