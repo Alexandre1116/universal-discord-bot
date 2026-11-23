@@ -1,5 +1,5 @@
 {
-  "name": "random-shit-discord-bot",
+  "name": "universal-discord-bot",
   "version": "1.0.0",
   "description": "Discord Bot com Web UI, Mensagens de Boas-Vindas/Saída e Canais de Voz Dinâmicos Clonados",
   "main": "src/index.js",
