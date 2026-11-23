@@ -249,8 +249,69 @@ if (!process.env.CONFIG_PATH) process.env.CONFIG_PATH = path.join(SANDBOX, 'veri
   rec('scheduler: ronda isolada em try/catch', /setInterval\(\(\) => \{[\s\S]{0,200}refreshScheduledMessages\(client\)/.test(read('src/bot/services/scheduledMessages.js')));
   rec('auto-mod: spamTracker varrido periodicamente', amod.includes('spamTracker.delete(key)') && amod.includes('const sweep = setInterval'));
   rec('pluginManager: subprocessos com timeout generoso', (pman.match(/timeout: 300000/g) || []).length >= 2);
-  rec('eventos de entrada/saída não engolem falhas de stats em silêncio', read('src/bot/events/guildMemberAdd.js').includes('[STATS] Instantâneo de membros (entrada) falhou') && read('src/bot/events/guildMemberRemove.js').includes('[STATS] Instantâneo de membros (saída) falhou'));
+  // --- credenciais de primeiro arranque ---
+  // o repositório não pode acompanhar data/config.json: trazia a password do
+  // painel em texto claro e impedia um arranque limpo de uma instalação nova
+  let trackedConfig = 'git-indisponivel';
+  try {
+    trackedConfig = require('child_process').execSync('git ls-files data/config.json', { cwd: ROOT, encoding: 'utf8' }).trim();
+    rec('repo não acompanha data/config.json', trackedConfig === '', trackedConfig === '' ? '(não listado)' : `listado: ${trackedConfig}`);
+  } catch (err) {
+    rec('repo não acompanha data/config.json', true, '(git indisponível — não verificável aqui)');
+  }
+  rec('.gitignore cobre data/', read('.gitignore').split('\n').map(l => l.trim()).includes('data/'));
+
+  // correr o módulo de config num processo filho, com CONFIG_PATH a apontar para
+  // um ficheiro inexistente: é exatamente o cenário "download recente"
+  const child = require('child_process');
+  const probe = path.join(SANDBOX, 'first-run.js');
+  // escreve para ficheiro (não para stdout): o módulo de config imprime o banner
+  // das credenciais no stdout e isso misturava-se com o resultado
+  fs.writeFileSync(probe, `
+    const fs = require('fs');
+    const cfg = require(${JSON.stringify(path.join(ROOT, 'src/utils/config.js'))}).getConfig();
+    const onDisk = JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, 'utf8'));
+    fs.writeFileSync(process.env.PROBE_OUT, JSON.stringify({
+      user: cfg.webAuth.username,
+      len: String(cfg.webAuth.password || '').length,
+      fixed: String(cfg.webAuth.password || '') === (process.env.WEB_AUTH_PASSWORD || ''),
+      diskUser: onDisk.webAuth.username,\n      mode: fs.statSync(process.env.CONFIG_PATH).mode & 0o777\n    }));
+  `);
+  const readProbe = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (err) { return { erro: String(err.message) }; } };
+  const genPath = path.join(SANDBOX, 'fresh-gen.json');
+  const genOut = path.join(SANDBOX, 'fresh-gen.out.json');
+  const envPath = path.join(SANDBOX, 'fresh-env.json');
+  const envOut = path.join(SANDBOX, 'fresh-env.out.json');
+
+  const cleanEnv = { ...process.env }; delete cleanEnv.WEB_AUTH_USERNAME; delete cleanEnv.WEB_AUTH_PASSWORD;
+  const r1 = child.spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...cleanEnv, CONFIG_PATH: genPath, PROBE_OUT: genOut } });
+  const o1 = readProbe(genOut);
+  rec('primeiro arranque gera config com webAuth e password de 12 chars', r1.status === 0 && o1.user === 'admin' && o1.len === 12 && o1.fixed === false, JSON.stringify({ o1, stderr: String(r1.stderr).slice(0, 150) }));
+  rec('config.json gerado com modo 0600', r1.status === 0 && o1.mode === 0o600, `mode=${o1.mode ? '0' + o1.mode.toString(8) : 'n/a'}`);
+
+  const r2 = child.spawnSync(process.execPath, [probe], {
+    encoding: 'utf8',
+    env: { ...process.env, CONFIG_PATH: envPath, PROBE_OUT: envOut, WEB_AUTH_USERNAME: 'dono', WEB_AUTH_PASSWORD: 'SenhaEscolhida1' }
+  });
+  const o2 = readProbe(envOut);
+  rec('WEB_AUTH_USERNAME/PASSWORD definem as credenciais no arranque', r2.status === 0 && o2.user === 'dono' && o2.fixed === true && o2.diskUser === 'dono', JSON.stringify({ o2, stderr: String(r2.stderr).slice(0, 150) }));
+
+  const rerunOut = path.join(SANDBOX, 'rerun.out.json');
+  const r3 = child.spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...cleanEnv, CONFIG_PATH: envPath, PROBE_OUT: rerunOut } });
+  const o3 = readProbe(rerunOut);
+  const pwAfterR3 = JSON.parse(fs.readFileSync(envPath, 'utf8')).webAuth.password;
+  rec('config existente nunca é substituído por credenciais novas', r3.status === 0 && o3.user === 'dono' && pwAfterR3 === 'SenhaEscolhida1', JSON.stringify({ o3, pwAfterR3, stderr: String(r3.stderr).slice(0, 150) }));
+
+  // duas instalações novas têm de chegar a passwords diferentes (é o que
+  // «gerar credenciais no primeiro arranque» quer dizer)
+  const gen2Path = path.join(SANDBOX, 'fresh-gen2.json');
+  const gen2Out = path.join(SANDBOX, 'fresh-gen2.out.json');
+  child.spawnSync(process.execPath, [probe], { encoding: 'utf8', env: { ...process.env, CONFIG_PATH: gen2Path, PROBE_OUT: gen2Out } });
+  const pwA = (JSON.parse(fs.readFileSync(genPath, 'utf8')).webAuth || {}).password;
+  const pwB = (JSON.parse(fs.readFileSync(gen2Path, 'utf8')).webAuth || {}).password;
+  rec('instalações diferentes recebem passwords diferentes', !!pwA && !!pwB && pwA !== pwB && pwA.length === 12 && pwB.length === 12, `a=${pwA ? pwA.length : 'n/a'} b=${pwB ? pwB.length : 'n/a'} iguais=${pwA === pwB}`);
   rec('UI: auto-respostas recarregam ao abrir o separador', appjs.includes("if (tabId === 'tab-customcmds') fetchCustomCommands();"));
+  rec('eventos de entrada/saída não engolem falhas de stats em silêncio', read('src/bot/events/guildMemberAdd.js').includes('[STATS] Instantâneo de membros (entrada) falhou') && read('src/bot/events/guildMemberRemove.js').includes('[STATS] Instantâneo de membros (saída) falhou'));
   rec('auto-mod/plugin.json sem gralha no displayName', JSON.parse(read('plugins/auto-mod/plugin.json')).displayName === 'Auto-Moderação');
   rec('credenciais geradas não entram no anel de logs', /function printGeneratedCredentials[\s\S]{0,400}process\.stdout\.write/.test(cfg) && !cfg.includes("console.log(`🔑 Password"));
   rec('roles/categories aceitam o servidor mostrado e a UI passa-o', apiExt.includes('req.query.guildId') && appjs.includes('/api/roles${currentGuilds[0]'));
@@ -268,5 +329,6 @@ if (!process.env.CONFIG_PATH) process.env.CONFIG_PATH = path.join(SANDBOX, 'veri
   let fails = 0;
   for (const r of results) { if (!r.ok) fails++; console.log(`${r.ok ? '  OK  ' : 'FALHA'} | ${r.name}${r.info ? ' :: ' + r.info : ''}`); }
   console.log(`\nFalhas: ${fails}/${results.length}`);
+  try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch (err) { /* temporário: não é crítico */ }
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error('ERRO NO TESTE:', e); process.exit(2); });

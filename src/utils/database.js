@@ -13,8 +13,10 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Migrar o data.db antigo para a nova pasta se necessário
-if (fs.existsSync(OLD_DB_PATH) && !fs.existsSync(DB_PATH)) {
+// Migrar o data.db antigo (raiz do projeto) para a nova pasta, se existir.
+// Só no modo por omissão: com DB_PATH apontado para outro lado (ex.: verify),
+// não queremos mover ficheiros reais para uma sandbox que depois é apagada.
+if (!process.env.DB_PATH && fs.existsSync(OLD_DB_PATH) && !fs.existsSync(DB_PATH)) {
   fs.renameSync(OLD_DB_PATH, DB_PATH);
 }
 
@@ -88,7 +90,8 @@ function saveDb() {
   if (!db || shuttingDown) return;
   const data = db.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
+  fs.writeFileSync(DB_PATH, buffer, { mode: 0o600 });
+  try { fs.chmodSync(DB_PATH, 0o600); } catch (err) { /* plataformas sem chmod */ }
 }
 
 // O sql.js não escreve em incremental: saveDb() exporta a BD inteira. Estatísticas

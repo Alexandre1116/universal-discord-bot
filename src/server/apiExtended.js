@@ -394,8 +394,10 @@ router.get('/backup', (req, res) => {
   const path = require('path');
   const { flushNow } = require('../utils/database');
   const DATA_DIR = path.join(__dirname, '../../data');
-  const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-  const DB_PATH = path.join(DATA_DIR, 'data.db');
+  // Alinhado com src/utils/config.js e src/utils/database.js: respeita
+  // CONFIG_PATH/DB_PATH do ambiente (ex.: verify, setups não-padrão).
+  const CONFIG_PATH = process.env.CONFIG_PATH || path.join(DATA_DIR, 'config.json');
+  const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'data.db');
 
   try {
     // as escritas de estatísticas/XP podem estar em fila (até 2 s): garantir que

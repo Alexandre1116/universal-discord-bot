@@ -12,8 +12,10 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Migrar o config.json antigo para a nova pasta se necessário
-if (fs.existsSync(OLD_CONFIG_PATH) && !fs.existsSync(CONFIG_PATH)) {
+// Migrar o config.json antigo (raiz do projeto) para a nova pasta, se existir.
+// Só no modo por omissão: com CONFIG_PATH apontado para outro lado (ex.: verify),
+// não queremos mover ficheiros reais para uma sandbox que depois é apagada.
+if (!process.env.CONFIG_PATH && fs.existsSync(OLD_CONFIG_PATH) && !fs.existsSync(CONFIG_PATH)) {
   fs.renameSync(OLD_CONFIG_PATH, CONFIG_PATH);
 }
 
@@ -104,13 +106,74 @@ function getConfig() {
   try {
     let currentConfig = { ...defaultConfig };
     if (!fs.existsSync(CONFIG_PATH)) {
-      currentConfig.webAuth = { username: 'admin', password: generateRandomPassword() };
-      saveConfig(currentConfig);
-      printGeneratedCredentials(currentConfig);
+      // Primeiro arranque (clone/download recente): não há config no repositório,
+      // por isso nasce um limpo com credenciais próprias. WEB_AUTH_USERNAME /
+      // WEB_AUTH_PASSWORD permitem defini-las à partida em Docker/headless.
+      // Se já tínhamos uma config válida em memória (o ficheiro desapareceu
+      // com o processo vivo — git pull/checkout com o bot a correr, remount),
+      // não a substituímos por uma nova: repomos a conhecida.
+      if (lastGoodConfig) {
+        console.error(`[CONFIG] ${CONFIG_PATH} desapareceu; a repor a última configuração conhecida em memória.`);
+        try { saveConfig(lastGoodConfig); } catch (err) { console.error('[CONFIG] Falha ao repor:', err.message); }
+        readFailed = false;
+        return lastGoodConfig;
+      }
+
+      const usernameFromEnv = String(process.env.WEB_AUTH_USERNAME || '').trim();
+      const rawPasswordEnv = String(process.env.WEB_AUTH_PASSWORD || '').trim();
+      let passwordFromEnv = rawPasswordEnv;
+      if (rawPasswordEnv && rawPasswordEnv.length < 8) {
+        console.warn('[CONFIG] WEB_AUTH_PASSWORD com menos de 8 caracteres; a ignorar e a gerar uma aleatória.');
+        passwordFromEnv = '';
+      }
+      const generatedUsername = usernameFromEnv || 'admin';
+      const generatedPassword = passwordFromEnv || generateRandomPassword();
+      const generated = !passwordFromEnv;
+
+      currentConfig.webAuth = { username: generatedUsername, password: generatedPassword };
+      const saved = saveConfig(currentConfig);
+      if (!saved) {
+        console.error(`[CONFIG] Falha ao gravar ${CONFIG_PATH}: credenciais não persistidas. Verifica permissões do directório.`);
+        readFailed = true;
+        return currentConfig;
+      }
+      if (generated) printGeneratedCredentials(currentConfig);
       lastGoodConfig = currentConfig;
+      readFailed = false;
       return currentConfig;
     }
     const data = fs.readFileSync(CONFIG_PATH, 'utf8');
+    // Ficheiro vazio: trata-se como "não existe" para não ficar preso num JSON
+    // inválido para sempre (caso comum ao criar o ficheiro à mão).
+    if (data.trim() === '') {
+      if (lastGoodConfig) {
+        console.error(`[CONFIG] ${CONFIG_PATH} vazio; a repor a última configuração conhecida em memória.`);
+        try { saveConfig(lastGoodConfig); } catch (err) { console.error('[CONFIG] Falha ao repor:', err.message); }
+        readFailed = false;
+        return lastGoodConfig;
+      }
+      const usernameFromEnv = String(process.env.WEB_AUTH_USERNAME || '').trim();
+      const rawPasswordEnv = String(process.env.WEB_AUTH_PASSWORD || '').trim();
+      let passwordFromEnv = rawPasswordEnv;
+      if (rawPasswordEnv && rawPasswordEnv.length < 8) {
+        console.warn('[CONFIG] WEB_AUTH_PASSWORD com menos de 8 caracteres; a ignorar e a gerar uma aleatória.');
+        passwordFromEnv = '';
+      }
+      const generatedUsername = usernameFromEnv || 'admin';
+      const generatedPassword = passwordFromEnv || generateRandomPassword();
+      const generated = !passwordFromEnv;
+      currentConfig.webAuth = { username: generatedUsername, password: generatedPassword };
+      const saved = saveConfig(currentConfig);
+      if (!saved) {
+        console.error(`[CONFIG] Falha ao gravar ${CONFIG_PATH}: credenciais não persistidas.`);
+        readFailed = true;
+        return currentConfig;
+      }
+      if (generated) printGeneratedCredentials(currentConfig);
+      lastGoodConfig = currentConfig;
+      readFailed = false;
+      return currentConfig;
+    }
     const parsed = JSON.parse(data);
     // Um JSON válido mas com a raiz errada (array, string, número) não pode ser
     // tratado como config: acabaria por gravar predefinições (e uma password nova)
@@ -121,12 +184,31 @@ function getConfig() {
     currentConfig = { ...defaultConfig, ...parsed };
 
     if (!currentConfig.webAuth) {
-      currentConfig.webAuth = { username: 'admin', password: generateRandomPassword() };
-      saveConfig(currentConfig);
-      printGeneratedCredentials(currentConfig);
+      const usernameFromEnv = String(process.env.WEB_AUTH_USERNAME || '').trim();
+      const rawPasswordEnv = String(process.env.WEB_AUTH_PASSWORD || '').trim();
+      let passwordFromEnv = rawPasswordEnv;
+      if (rawPasswordEnv && rawPasswordEnv.length < 8) {
+        console.warn('[CONFIG] WEB_AUTH_PASSWORD com menos de 8 caracteres; a ignorar e a gerar uma aleatória.');
+        passwordFromEnv = '';
+      }
+      const generatedUsername = usernameFromEnv || 'admin';
+      const generatedPassword = passwordFromEnv || generateRandomPassword();
+      const generated = !passwordFromEnv;
+
+      currentConfig.webAuth = { username: generatedUsername, password: generatedPassword };
+      const saved = saveConfig(currentConfig);
+      if (!saved) {
+        console.error(`[CONFIG] Falha ao gravar ${CONFIG_PATH}: credenciais não persistidas.`);
+        readFailed = true;
+        return lastGoodConfig || currentConfig;
+      }
+      if (generated) printGeneratedCredentials(currentConfig);
+      lastGoodConfig = currentConfig;
+      readFailed = false;
+    } else {
+      readFailed = false;
+      lastGoodConfig = currentConfig;
     }
-    readFailed = false;
-    lastGoodConfig = currentConfig;
     return currentConfig;
   } catch (error) {
     // Um config.json corrompido não pode fazer as alterações seguintes gravarem
@@ -146,8 +228,11 @@ function saveConfig(newConfig) {
     // Escrita atómica: escreve num temporário e troca com rename, para nunca
     // deixar um config.json a meio (pedido de restauro/queda no meio da escrita)
     const tmpPath = `${CONFIG_PATH}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    // 0600: só o dono lê/escreve — o ficheiro contém token, password do painel
+    // e sessionSecret. O rename preserva o modo do ficheiro temporário.
+    fs.writeFileSync(tmpPath, JSON.stringify(newConfig, null, 2), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmpPath, CONFIG_PATH);
+    try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (err) { /* plataformas sem chmod */ }
     // A cópia de segurança em memória tem de ser ESTA configuração: sem isto, o
     // plano "gravar a última conhecida" pode repor valores antigos
     lastGoodConfig = newConfig;
