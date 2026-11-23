@@ -16,11 +16,11 @@ const { client, initBot } = require('./bot/client');
 const apiRoutes = require('./server/api');
 const apiExtendedRoutes = require('./server/apiExtended');
 const { authMiddleware, setupAuthRoutes } = require('./server/auth');
-const { getDb } = require('./utils/database');
+const { getDb, recordMemberCount } = require('./utils/database');
 const { getConfig, updateConfig } = require('./utils/config');
 const { loadPlugins } = require('./utils/pluginManager');
 const { startScheduledMessages } = require('./bot/services/scheduledMessages');
-const { REST, Routes } = require('discord.js');
+const { REST, Routes, Events } = require('discord.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,7 +44,16 @@ const loginLimiter = rateLimit({
   message: { success: false, error: 'Demasiadas tentativas de login. Tenta novamente mais tarde.' }
 });
 
-app.use(bodyParser.json());
+// O restauro envia a base de dados inteira em base64: o limite por omissão do
+// body-parser (100 KB) rebentava com 413 em backups perfeitamente normais (uma
+// BD com 90 dias de histórico de um servidor já passa os 100 KB).
+// O parser grande é montado JÁ DEPOIS da autenticação (em baixo) — caso contrário
+// qualquer pessoa sem sessão fazia o processo ler e analisar dezenas de MB. Aqui
+// apenas deixamos esse pedido passar sem parser.
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path.toLowerCase() === '/api/restore') return next();
+  return bodyParser.json()(req, res, next);
+});
 // Garantir session secret persistente
 const sessionSecret = process.env.SESSION_SECRET || (() => {
   const config = getConfig();
@@ -59,7 +68,11 @@ app.use(session({
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 horas
+  // sameSite: 'lax' fecha a porta mais óbvia a CSRF: o browser não envia o
+  // cookie de sessão em POSTs vindos de outro site. Uma proteção anti-CSRF com
+  // token fica apontada como follow-up (todas as rotas de escrita exigem JSON,
+  // o que já bloqueia o ataque por <form>).
+  cookie: { maxAge: 24 * 60 * 60 * 1000, httpOnly: true, sameSite: 'lax' } // 24 horas
 }));
 
 // Servir ficheiros estáticos
@@ -71,6 +84,10 @@ setupAuthRoutes(app, loginLimiter);
 // Auth middleware para proteger API (se OAuth ativo)
 app.use('/api', authMiddleware);
 
+// A partir daqui a sessão já foi validada: só agora vale a pena ler um corpo
+// potencialmente grande (o restauro traz a BD em base64)
+app.post('/api/restore', bodyParser.json({ limit: process.env.RESTORE_BODY_LIMIT || '50mb' }));
+
 // Health check endpoint (antes das rotas protegidas)
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
@@ -79,6 +96,33 @@ app.get('/health', (req, res) => {
 // Rotas API Core
 app.use('/api', apiRoutes);
 app.use('/api', apiExtendedRoutes);
+
+// Router onde os plugins instalam as suas rotas HTTP (registrado antes do
+// fallback 404 para que rotas adicionadas em tempo de execução funcionem)
+const pluginRouter = express.Router();
+app.use(pluginRouter);
+
+// Rotas de API desconhecidas devolvem JSON (em vez do HTML da SPA)
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, error: `Rota da API não encontrada: ${req.method} ${req.originalUrl}` });
+});
+
+// Erros de parsing/middleware em JSON: sem isto um body demasiado grande chegava
+// à Web UI como HTML e o browser mostrava "Unexpected token '<'"
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: `Pedido demasiado grande. Para restaurar backups maiores aumente RESTORE_BODY_LIMIT (atualmente ${process.env.RESTORE_BODY_LIMIT || '50mb'}).`
+    });
+  }
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ success: false, error: `JSON inválido no pedido: ${err.message}` });
+  }
+  console.error('[WEB] Erro não tratado:', err.message);
+  res.status(err.status || 500).json({ success: false, error: err.message || 'Erro interno.' });
+});
 
 // Registar Eventos do Bot Core
 registerGuildMemberAdd(client);
@@ -90,7 +134,8 @@ getDb().catch(err => console.error('[DB] Erro ao inicializar base de dados:', er
 
 // Carregar Plugins apenas quando o bot estiver pronto
 let pluginCommands = [];
-client.once('ready', async () => {
+let memberSnapshotsStarted = false; // evita registar o cron duas vezes num reconnect
+client.once(Events.ClientReady, async () => {
   // Garantir que a base de dados está pronta antes de carregar plugins
   try {
     await getDb();
@@ -100,7 +145,7 @@ client.once('ready', async () => {
 
   // Carregar plugins dentro do ready para garantir que client.user está disponível
   try {
-    pluginCommands = loadPlugins(client, app);
+    pluginCommands = loadPlugins(client, pluginRouter);
   } catch (err) {
     console.error('[PLUGINS] Erro ao carregar plugins:', err);
   }
@@ -112,6 +157,23 @@ client.once('ready', async () => {
     console.error('[SCHEDULER] Erro ao iniciar agendador de mensagens:', err);
   }
 
+  // Instantâneos do número de membros (alimenta o gráfico de crescimento da Web UI)
+  if (!memberSnapshotsStarted) {
+    memberSnapshotsStarted = true;
+    try {
+      const snapshotMembers = () => {
+        for (const guild of client.guilds.cache.values()) {
+          recordMemberCount(guild.id, guild.memberCount);
+        }
+      };
+      snapshotMembers();
+      cron.schedule('0 * * * *', snapshotMembers); // a cada hora
+      console.log('[STATS] Instantâneos de membros ativos (1x por hora).');
+    } catch (err) {
+      console.error('[STATS] Erro ao iniciar instantâneos de membros:', err);
+    }
+  }
+
   // Registarr slash commands
   const clientId = process.env.CLIENT_ID || getConfig().clientId || client.user.id;
   const token = process.env.DISCORD_TOKEN || getConfig().token;
@@ -120,12 +182,16 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(token);
     try {
       const commandJSONs = pluginCommands.map(c => c.toJSON ? c.toJSON() : c);
-      console.log(`[COMMANDS] A registar ${commandJSONs.length} slash commands de plugins...`);
-      await rest.put(
-        Routes.applicationCommands(clientId),
-        { body: commandJSONs }
-      );
-      console.log(`[COMMANDS] Slash commands registados com sucesso!`);
+      if (commandJSONs.length === 0) {
+        console.warn('[COMMANDS] Nenhum comando de plugin ativo — nenhum comando registado no Discord.');
+      } else {
+        console.log(`[COMMANDS] A registar ${commandJSONs.length} slash commands de plugins...`);
+        await rest.put(
+          Routes.applicationCommands(clientId),
+          { body: commandJSONs }
+        );
+        console.log(`[COMMANDS] Slash commands registados com sucesso!`);
+      }
     } catch (error) {
       console.error('[COMMANDS] Erro ao registar slash commands:', error);
     }

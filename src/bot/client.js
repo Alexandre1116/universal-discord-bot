@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Events } = require('discord.js');
 const { getConfig } = require('../utils/config');
 
 
@@ -17,7 +17,7 @@ const client = new Client({
 
 let isBotReady = false;
 
-client.once('ready', () => {
+client.once(Events.ClientReady, () => {
   isBotReady = true;
   console.log(`[BOT] Bot ligado com sucesso como: ${client.user.tag}`);
   
@@ -52,14 +52,29 @@ client.once('ready', () => {
           const files = [];
           
           if (fs.existsSync(path.join(DATA_DIR, 'config.json'))) {
-            files.push(new AttachmentBuilder(path.join(DATA_DIR, 'config.json'), { name: 'config.json' }));
+            // O canal de Discord NÃO fica com segredos: token, credenciais do
+            // painel e session secret são removidos do anexo. O backup completo
+            // (com segredos) continua disponível no painel em /api/backup.
+            const sanitized = { ...currentConfig };
+            delete sanitized.token;
+            delete sanitized.webAuth;
+            delete sanitized.sessionSecret;
+            sanitized._backupNota = 'Anexo sem token/credenciais. Usa o painel (Backup & Restauro) para o backup completo.';
+            files.push(new AttachmentBuilder(Buffer.from(JSON.stringify(sanitized, null, 2), 'utf8'), { name: 'config.json' }));
           }
           if (fs.existsSync(path.join(DATA_DIR, 'data.db'))) {
+            // as escritas de estatísticas/XP podem estar em fila (até 2 s)
+            require('../utils/database').flushNow();
             files.push(new AttachmentBuilder(path.join(DATA_DIR, 'data.db'), { name: 'data.db' }));
           }
           
           if (files.length > 0) {
-            await channel.send({ content: `📦 **Backup Diário Automático** (${new Date().toLocaleDateString('pt-PT')})`, files });
+            // honesto sobre o alcance do anexo: a BD não é filtrada e contém os
+            // dados de TODOS os servidores onde o bot está
+            await channel.send({
+              content: `📦 **Backup Diário Automático** (${new Date().toLocaleDateString('pt-PT')})\n⚠️ O anexo \`data.db\` contém todos os dados guardados pelo bot (XP, avisos, tickets, sorteios e histórico) de **todos** os servidores — qualquer pessoa que consiga ler este canal consegue descarregá-lo.`,
+              files
+            });
             console.log('[BACKUP] Backup diário enviado com sucesso.');
           }
         }

@@ -14,6 +14,7 @@ async function getLogChannel(guild) {
 
 const events = {
   messageDelete: async (client, message) => {
+    if (!message.guild) return;
     if (message.author?.bot) return;
     const config = getConfig();
     const auditConfig = config.auditLog || {};
@@ -26,7 +27,7 @@ const events = {
       .setColor('#ED4245')
       .setTitle('🗑️ Mensagem Apagada')
       .addFields(
-        { name: 'Autor', value: `<@${message.author.id}> (${message.author.tag})`, inline: true },
+        { name: 'Autor', value: message.author ? `<@${message.author.id}> (${message.author.tag})` : 'Desconhecido', inline: true },
         { name: 'Canal', value: `<#${message.channel.id}>`, inline: true }
       )
       .setDescription(message.content ? `**Conteúdo:** ${message.content.slice(0, 1024)}` : '*Sem conteúdo (possivelmente embed/imagem)*')
@@ -36,6 +37,7 @@ const events = {
   },
 
   messageUpdate: async (client, oldMessage, newMessage) => {
+    if (!oldMessage.guild) return;
     if (oldMessage.author?.bot) return;
     if (oldMessage.content === newMessage.content) return;
     const config = getConfig();

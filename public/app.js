@@ -16,7 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
     'tab-join': ['Mensagens de Entrada', 'Personaliza a boas-vindas'],
     'tab-leave': ['Mensagens de Saída', 'Configura o aviso de saída'],
     'tab-voice': ['Canais de Voz Dinâmicos', 'Criação de salas temporárias'],
+    'tab-plugins': ['Plugins', 'Ativar, desativar e instalar plugins'],
     'tab-moderation': ['Auto-Moderação', 'Anti-spam, links, palavras proibidas'],
+    'tab-customcmds': ['Auto-Respostas', 'Comandos personalizados do chat'],
+    'tab-notifications': ['Notificações', 'YouTube e Twitch'],
     'tab-audit': ['Audit Logs', 'Registo automático de eventos'],
     'tab-tickets': ['Sistema de Tickets', 'Suporte com canais privados'],
     'tab-reactionroles': ['Reaction Roles', 'Cargos por botão'],
@@ -24,23 +27,34 @@ document.addEventListener('DOMContentLoaded', () => {
     'tab-embeds': ['Embeds & Agendados', 'Enviar e agendar mensagens'],
     'tab-giveaways': ['Giveaways', 'Sorteios no servidor'],
     'tab-stats': ['Estatísticas', 'Gráficos e dados do servidor'],
-    'tab-settings': ['Definições', 'Token e OAuth2']
+    'tab-settings': ['Definições', 'Token, backups e comandos']
   };
 
   // NAV CLICK
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const tabId = item.getAttribute('data-tab');
-      navItems.forEach(n => n.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
+      const section = document.getElementById(tabId);
+      if (!section) {
+        console.warn(`[NAV] Aba desconhecida: ${tabId}`);
+        return;
+      }
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       item.classList.add('active');
-      document.getElementById(tabId).classList.add('active');
+      section.classList.add('active');
       const t = tabTitles[tabId];
       if (t) { pageTitle.textContent = t[0]; pageSubtitle.textContent = t[1]; }
       // Load tab-specific data
       if (tabId === 'tab-stats') loadStats();
       if (tabId === 'tab-levels') loadLeaderboard();
       if (tabId === 'tab-giveaways') loadGiveaways();
+      if (tabId === 'tab-embeds') loadScheduled();
+      if (tabId === 'tab-plugins') fetchPlugins();
+      // as auto-respostas só eram relidas no arranque da página: quem abria o
+      // separador via API (ou noutro browser) ficava com a lista desactualizada
+      // e um Guardar por cima substituía o que não estava visível
+      if (tabId === 'tab-customcmds') fetchCustomCommands();
     });
   });
 
@@ -110,15 +124,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const d = currentConfig;
       // Join config
       if (d.joinMessage) {
-        setVal('joinEnabled', d.joinMessage.enabled, true);
+        setVal('joinEnabled', !!d.joinMessage.enabled, 'checked');
         setVal('joinChannelSelect', d.joinMessage.channelId);
         setVal('joinMessageType', d.joinMessage.messageType);
         setVal('joinEmbedTitle', d.joinMessage.embedTitle);
         setVal('joinContent', d.joinMessage.content);
         setVal('joinEmbedColorPicker', d.joinMessage.embedColor || '#5865F2');
         setVal('joinEmbedColor', d.joinMessage.embedColor || '#5865F2');
-        setVal('joinShowAvatar', d.joinMessage.showAvatar, true);
-        setVal('joinGenerateImage', d.joinMessage.generateImage, true);
+        setVal('joinShowAvatar', d.joinMessage.showAvatar !== false, 'checked');
+        setVal('joinGenerateImage', !!d.joinMessage.generateImage, 'checked');
         setVal('joinImageBackgroundUrl', d.joinMessage.imageBackgroundUrl || '');
         updateJoinPreview();
       }
@@ -140,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setVal('presenceText', p.activityText || '');
 
       const b = currentConfig.backup || {};
-      setVal('backupAutoEnabled', b.autoBackup, true);
+      setVal('backupAutoEnabled', !!b.autoBackup, 'checked');
     } catch (e) { console.error(e); }
   }
 
@@ -156,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchRoles() {
     try {
-      const r = await fetch('/api/roles'); serverRoles = await r.json();
+      const r = await fetch(`/api/roles${currentGuilds[0]?.id ? `?guildId=${currentGuilds[0].id}` : ''}`); serverRoles = await r.json();
       populateRoleDropdowns();
     } catch (e) { console.error(e); }
   }
@@ -194,9 +208,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (d.logChannelId) setVal('ticketLogChannel', d.logChannelId);
       }, 500);
       // Categories
-      const cr = await fetch('/api/categories'); const cats = await cr.json();
+      const cr = await fetch(`/api/categories${currentGuilds[0]?.id ? `?guildId=${currentGuilds[0].id}` : ''}`); const cats = await cr.json();
       const catSel = document.getElementById('ticketCategory');
-      catSel.innerHTML = '<option value="">Sem categoria</option>' + cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      catSel.innerHTML = '<option value="">Sem categoria</option>' + cats.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
       if (d.categoryId) catSel.value = d.categoryId;
     } catch (e) { console.error(e); }
   }
@@ -215,6 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
       setVal('levelsMinXp', d.minXp || 15);
       setVal('levelsMaxXp', d.maxXp || 25);
       setVal('levelsXpCooldown', d.xpCooldown || 60);
+      setVal('levelsVoiceEnabled', d.voiceXpEnabled !== false, 'checked');
+      setVal('levelsVoiceInterval', d.voiceXpInterval || 60);
+      setVal('levelsVoiceAmount', d.voiceXpAmount || 5);
       setTimeout(() => { if (d.announceChannelId) setVal('levelsAnnounceChannel', d.announceChannelId); }, 500);
       renderLevelRoles(d.roles || []);
     } catch (e) { console.error(e); }
@@ -234,15 +251,15 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderGuilds(guilds) {
     const el = document.getElementById('guildsList');
     if (!guilds.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-robot"></i><p>Sem servidores.</p></div>'; return; }
-    el.innerHTML = guilds.map(g => `<div class="guild-card"><div class="guild-icon">${g.icon ? `<img src="${g.icon}" style="width:100%;height:100%;border-radius:50%">` : g.name[0]}</div><div class="guild-info"><h4>${g.name}</h4><span>${g.textChannels.length} texto | ${g.voiceChannels.length} voz</span></div></div>`).join('');
+    el.innerHTML = guilds.map(g => `<div class="guild-card"><div class="guild-icon">${g.icon ? `<img src="${escapeHtml(g.icon)}" style="width:100%;height:100%;border-radius:50%">` : escapeHtml(g.name[0])}</div><div class="guild-info"><h4>${escapeHtml(g.name)}</h4><span>${g.textChannels.length} texto | ${g.voiceChannels.length} voz</span></div></div>`).join('');
   }
 
   function populateChannelDropdowns(guilds) {
     let textOpts = '<option value="">-- Selecionar Canal --</option>';
     let voiceOpts = '<option value="">-- Selecionar Canal de Voz --</option>';
     guilds.forEach(g => {
-      if (g.textChannels.length) { textOpts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}"># ${c.name}</option>`).join('')}</optgroup>`; }
-      if (g.voiceChannels.length) { voiceOpts += `<optgroup label="${g.name}">${g.voiceChannels.map(c => `<option value="${c.id}">🔊 ${c.name}</option>`).join('')}</optgroup>`; }
+      if (g.textChannels.length) { textOpts += `<optgroup label="${escapeHtml(g.name)}">${g.textChannels.map(c => `<option value="${escapeHtml(c.id)}"># ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
+      if (g.voiceChannels.length) { voiceOpts += `<optgroup label="${escapeHtml(g.name)}">${g.voiceChannels.map(c => `<option value="${escapeHtml(c.id)}">🔊 ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
     });
     ['joinChannelSelect', 'leaveChannelSelect', 'auditChannelSelect', 'rrChannelSelect', 'embedChannelSelect', 'scheduleChannelSelect', 'ticketLogChannel', 'levelsAnnounceChannel', 'backupChannelSelect'].forEach(id => {
       const el = document.getElementById(id);
@@ -257,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function populateRoleDropdowns() {
-    const roleOpts = '<option value="">-- Cargo --</option>' + serverRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    const roleOpts = '<option value="">-- Cargo --</option>' + serverRoles.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
     const el = document.getElementById('ticketSupportRole');
     if (el) el.innerHTML = roleOpts;
   }
@@ -265,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderVoiceHubs(hubs) {
     const el = document.getElementById('voiceHubsList');
     if (!hubs.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-microphone-slash"></i><p>Nenhum hub.</p></div>'; return; }
-    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${h.channelId}</h5><p>Padrão: <code>${h.namePattern}</code> | Limite: ${h.userLimit > 0 ? h.userLimit : 'Original'}</p></div><button class="btn btn-danger btn-sm" onclick="deleteHub('${h.id || h.channelId}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = hubs.map(h => `<div class="hub-card"><div class="hub-info"><h5><i class="fa-solid fa-microphone" style="color:var(--accent-purple)"></i> ${escapeHtml(h.channelId)}</h5><p>Padrão: <code>${escapeHtml(h.namePattern)}</code> | Limite: ${h.userLimit > 0 ? escapeHtml(h.userLimit) : 'Original'}</p></div><button class="btn btn-danger btn-sm" data-action="delete-hub" data-id="${escapeHtml(h.id || h.channelId)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
 
   // ========== PREVIEWS ==========
@@ -324,15 +341,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // JOIN
   document.getElementById('formJoinConfig').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/config', { joinMessage: { enabled: getChecked('joinEnabled'), channelId: getVal('joinChannelSelect'), messageType: getVal('joinMessageType'), embedTitle: getVal('joinEmbedTitle'), content: getVal('joinContent'), embedColor: getVal('joinEmbedColor'), showAvatar: getChecked('joinShowAvatar'), generateImage: getChecked('joinGenerateImage'), imageBackgroundUrl: getVal('joinImageBackgroundUrl') } });
-    showToast('Boas-vindas guardadas!'); fetchConfig();
+    const r = await postJson('/api/config', { joinMessage: { enabled: getChecked('joinEnabled'), channelId: getVal('joinChannelSelect'), messageType: getVal('joinMessageType'), embedTitle: getVal('joinEmbedTitle'), content: getVal('joinContent'), embedColor: getVal('joinEmbedColor'), showAvatar: getChecked('joinShowAvatar'), generateImage: getChecked('joinGenerateImage'), imageBackgroundUrl: getVal('joinImageBackgroundUrl') } });
+    showToast(r.success ? 'Boas-vindas guardadas!' : (r.error || 'Falha ao guardar.'), !r.success);
+    if (r.success) fetchConfig();
   });
 
   // LEAVE
   document.getElementById('formLeaveConfig').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/config', { leaveMessage: { enabled: getChecked('leaveEnabled'), channelId: getVal('leaveChannelSelect'), messageType: getVal('leaveMessageType'), embedTitle: getVal('leaveEmbedTitle'), content: getVal('leaveContent'), embedColor: getVal('leaveEmbedColor'), showAvatar: getChecked('leaveShowAvatar') } });
-    showToast('Saída guardada!'); fetchConfig();
+    const r = await postJson('/api/config', { leaveMessage: { enabled: getChecked('leaveEnabled'), channelId: getVal('leaveChannelSelect'), messageType: getVal('leaveMessageType'), embedTitle: getVal('leaveEmbedTitle'), content: getVal('leaveContent'), embedColor: getVal('leaveEmbedColor'), showAvatar: getChecked('leaveShowAvatar') } });
+    showToast(r.success ? 'Saída guardada!' : (r.error || 'Falha ao guardar.'), !r.success);
+    if (r.success) fetchConfig();
   });
 
   // TEST JOIN/LEAVE
@@ -351,43 +370,44 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formAddVoiceHub').addEventListener('submit', async e => {
     e.preventDefault();
     const ch = getVal('voiceHubSelect'); if (!ch) return showToast('Seleciona um canal!', true);
-    await postJson('/api/hubs', { channelId: ch, namePattern: getVal('voiceNamePattern'), userLimit: getVal('voiceUserLimit') });
-    showToast('Hub adicionado!'); fetchConfig();
+    const r = await postJson('/api/hubs', { channelId: ch, namePattern: getVal('voiceNamePattern'), userLimit: getVal('voiceUserLimit') });
+    if (notifySaved(r, 'Hub adicionado!')) fetchConfig();
   });
   window.deleteHub = async id => {
-    await fetch(`/api/hubs/${id}`, { method: 'DELETE' });
-    showToast('Hub removido!'); fetchConfig();
+    const res = await fetch(`/api/hubs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Hub removido!')) fetchConfig();
   };
 
   // MODERATION
   document.getElementById('formModeration').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/moderation', {
+    const r = await postJson('/api/moderation', {
       enabled: getChecked('modEnabled'), antiSpam: getChecked('modAntiSpam'), antiLinks: getChecked('modAntiLinks'), antiCaps: getChecked('modAntiCaps'),
       bannedWords: getVal('modBannedWords').split('\n').map(w => w.trim()).filter(w => w),
       maxStrikes: parseInt(getVal('modMaxStrikes')) || 3, strikeAction: getVal('modStrikeAction')
     });
-    showToast('Moderação guardada!');
+    notifySaved(r, 'Moderação guardada!');
   });
 
   // AUDIT LOG
   document.getElementById('formAuditLog').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/audit-log', {
+    const r = await postJson('/api/audit-log', {
       enabled: getChecked('auditEnabled'), channelId: getVal('auditChannelSelect'),
       messageDelete: getChecked('auditMsgDelete'), messageEdit: getChecked('auditMsgEdit'),
       bans: getChecked('auditBans'), voiceJoinLeave: getChecked('auditVoice')
     });
-    showToast('Audit Log guardado!');
+    notifySaved(r, 'Audit Log guardado!');
   });
 
   // TICKETS
   document.getElementById('formTickets').addEventListener('submit', async e => {
     e.preventDefault();
-    await postJson('/api/tickets/config', {
+    const r = await postJson('/api/tickets/config', {
       supportRoleId: getVal('ticketSupportRole'), categoryId: getVal('ticketCategory'), logChannelId: getVal('ticketLogChannel')
     });
-    showToast('Tickets configurados!');
+    notifySaved(r, 'Tickets configurados!');
   });
 
   // REACTION ROLES
@@ -423,19 +443,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cmds.length) {
       container.innerHTML = '<div class="empty-state"><p>Sem auto-respostas configuradas.</p></div>';
     } else {
-      cmds.forEach(cmd => addCustomCmdRow(cmd.trigger, cmd.response, cmd.matchType));
+      cmds.forEach(cmd => addCustomCmdRow(cmd.trigger, cmd.response, cmd.matchType, cmd));
     }
   }
 
-  function addCustomCmdRow(trigger = '', response = '', matchType = 'exact') {
+  function addCustomCmdRow(trigger = '', response = '', matchType = 'exact', original = null) {
     const container = document.getElementById('customCmdsList');
+    if (!container) return;
     // remover state vazio se existir
     const empty = container.querySelector('.empty-state');
     if (empty) empty.remove();
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: !ip)" value="${trigger}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${response}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    // Guarda a entrada original para não perder campos que este formulário não
+    // mostra (type/title/color dos embeds já gravados)
+    if (original) row.dataset.original = JSON.stringify(original);
+    row.innerHTML = `<select class="form-control cmd-match" style="max-width:140px"><option value="exact" ${matchType === 'exact' ? 'selected' : ''}>Texto exato</option><option value="startsWith" ${matchType === 'startsWith' ? 'selected' : ''}>Começa por</option><option value="regex" ${matchType === 'regex' ? 'selected' : ''}>Regex</option></select><input type="text" class="form-control cmd-trigger" placeholder="Trigger (ex: regras — a mensagem usa !regras)" value="${escapeHtml(trigger)}"><input type="text" class="form-control cmd-response" placeholder="Resposta do bot" value="${escapeHtml(response)}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -448,19 +472,138 @@ document.addEventListener('DOMContentLoaded', () => {
       const matchType = row.querySelector('.cmd-match').value;
       const trigger = row.querySelector('.cmd-trigger').value.trim();
       const response = row.querySelector('.cmd-response').value.trim();
-      if (trigger && response) commands.push({ trigger, response, matchType });
+      let base = {};
+      try { base = row.dataset.original ? JSON.parse(row.dataset.original) : {}; } catch (err) { base = {}; }
+      if (trigger && response) commands.push({ ...base, trigger, response, matchType });
     });
     const r = await postJson('/api/custom-commands', { commands });
     showToast(r.success ? 'Auto-respostas guardadas!' : r.error, !r.success);
   });
 
   // PLUGINS
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // Ações dos cartões. Handlers em atributos (onclick="...") não são protegidos
+  // por escapeHtml: o browser descodifica as entidades ANTES de interpretar o
+  // JavaScript, por isso um valor com &#39; saía do literal. Os ids passam a ir
+  // em data-* e o handler é registado aqui (delegação no documento).
+  document.addEventListener('click', e => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const id = el.dataset.id;
+    switch (el.dataset.action) {
+      case 'delete-hub': window.deleteHub(id); break;
+      case 'delete-rr': window.deleteRR(id); break;
+      case 'delete-sched': window.deleteSched(id); break;
+      case 'delete-plugin': window.deletePlugin(id); break;
+    }
+  });
+  document.addEventListener('change', e => {
+    const el = e.target.closest('[data-action="toggle-plugin"]');
+    if (el) window.togglePlugin(el.dataset.id, el.checked);
+  });
+
+  function injectPluginTabs(plugins) {
+    const nav = document.querySelector('.nav-menu');
+    const main = document.querySelector('.main-content');
+    if (!nav || !main) return;
+
+    // Só plugins ATIVOS com ui/tab.html recebem aba
+    const wanted = plugins.filter(p => p.hasUi && p.enabled);
+    const wantedIds = new Set(wanted.map(p => p.folderId));
+
+    // Retira abas de plugins que foram desativados/eliminados desde a última atualização
+    document.querySelectorAll('.nav-item[data-tab^="tab-plugin-"]').forEach(btn => {
+      const folderId = btn.getAttribute('data-tab').slice('tab-plugin-'.length);
+      if (wantedIds.has(folderId)) return;
+      const section = document.getElementById(`tab-plugin-${folderId}`);
+      btn.remove();
+      if (section) section.remove();
+    });
+
+    wanted.forEach(p => {
+      const tabId = `tab-plugin-${p.folderId}`;
+      if (document.getElementById(tabId)) return;
+
+      const uiBase = `/api/plugins-ui/${encodeURIComponent(p.folderId)}/ui/`;
+      // Caminhos relativos do tab.html resolvem contra a pasta ui/ do plugin
+      // (new URL trata corretamente de ./, ../ e nomes como .hidden.css)
+      const resolveAsset = (raw) => {
+        if (!raw) return raw;
+        if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('/') || raw.startsWith('data:') || raw.startsWith('#')) return raw;
+        try {
+          return new URL(raw, `${location.origin}${uiBase}`).pathname;
+        } catch (err) {
+          return raw;
+        }
+      };
+
+      const btn = document.createElement('button');
+      btn.className = 'nav-item';
+      btn.setAttribute('data-tab', tabId);
+      btn.innerHTML = `<i class="fa-solid fa-puzzle-piece"></i><span>${escapeHtml(p.displayName || p.name)}</span>`;
+
+      const section = document.createElement('section');
+      section.id = tabId;
+      section.className = 'tab-content';
+      section.innerHTML = `<div class="content-card"><div class="card-body plugin-ui-container" data-plugin="${escapeHtml(p.folderId)}">A carregar a interface do plugin…</div></div>`;
+
+      nav.appendChild(btn);
+      main.appendChild(section);
+
+      btn.addEventListener('click', async () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        section.classList.add('active');
+        pageTitle.textContent = p.displayName || p.name;
+        pageSubtitle.textContent = p.description || `Plugin: ${p.folderId}`;
+
+        const container = section.querySelector('.plugin-ui-container');
+        if (container.dataset.loaded === '1') return;
+        if (container.dataset.loading === '1') return; // dois cliques rápidos não carregam/executam a aba duas vezes
+        container.dataset.loading = '1';
+        try {
+          const res = await fetch(`${uiBase}tab.html`);
+          if (!res.ok) throw new Error(`tab.html não encontrado (HTTP ${res.status})`);
+          container.innerHTML = await res.text();
+
+          // Estilos/imagens relativos
+          container.querySelectorAll('link[href], img[src], source[src], video[src], audio[src], iframe[src]').forEach(el => {
+            const attr = el.hasAttribute('href') ? 'href' : 'src';
+            el.setAttribute(attr, resolveAsset(el.getAttribute(attr)));
+          });
+
+          // Recria <script> (sozinhos não executam)
+          container.querySelectorAll('script').forEach(old => {
+            const fresh = document.createElement('script');
+            const rawSrc = old.getAttribute('src');
+            if (rawSrc) fresh.src = resolveAsset(rawSrc);
+            else fresh.textContent = old.textContent;
+            if (old.type) fresh.type = old.type;
+            old.replaceWith(fresh);
+          });
+
+          container.dataset.loaded = '1';
+        } catch (err) {
+          container.innerHTML = `<p style="color:#ed4245">Não foi possível carregar a aba do plugin: ${escapeHtml(err.message)}</p>`;
+        } finally {
+          delete container.dataset.loading;
+        }
+      });
+    });
+  }
+
   async function fetchPlugins() {
     try {
       const r = await fetch('/api/plugins'); 
       const plugins = await r.json();
       const list = document.getElementById('pluginsList');
       if (!list) return;
+
+      injectPluginTabs(plugins);
 
       if (plugins.length === 0) {
         list.innerHTML = '<p>Nenhum plugin instalado.</p>';
@@ -469,19 +612,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let html = '';
       for (const p of plugins) {
+        // escapeHtml em todos os campos vindos do plugin.json (não são confiáveis)
         html += `
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h5 style="margin: 0; color: #fff;">${p.displayName || p.name} <small style="color: #aaa;">v${p.version || '1.0'}</small></h5>
-            <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${p.description || 'Sem descrição.'}</p>
-            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${p.author || 'Desconhecido'} | ID: ${p.folderId}</p>
+            <h5 style="margin: 0; color: #fff;">${escapeHtml(p.displayName || p.name)} <small style="color: #aaa;">v${escapeHtml(p.version || '1.0')}</small></h5>
+            <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #ccc;">${escapeHtml(p.description || 'Sem descrição.')}</p>
+            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #888;">Autor: ${escapeHtml(p.author || 'Desconhecido')} | ID: ${escapeHtml(p.folderId)}${p.isOfficial ? ' (oficial)' : ''}</p>
           </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <label class="toggle-switch">
-              <input type="checkbox" onchange="togglePlugin('${p.folderId}', this.checked)" ${p.enabled ? 'checked' : ''}>
+              <input type="checkbox" data-action="toggle-plugin" data-id="${escapeHtml(p.folderId)}" ${p.enabled ? 'checked' : ''}>
               <span class="slider"></span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.folderId}')"><i class="fa-solid fa-trash"></i></button>
+            ${p.isOfficial ? '' : `<button class="btn btn-danger btn-sm" data-action="delete-plugin" data-id="${escapeHtml(p.folderId)}"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </div>`;
       }
@@ -497,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.deletePlugin = async (pluginId) => {
     if (!confirm('Tens a certeza que queres eliminar este plugin?')) return;
     try {
-      const res = await fetch(`/api/plugins/${pluginId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
       const r = await res.json();
       showToast(r.success ? 'Plugin eliminado com sucesso!' : r.error, !r.success);
       fetchPlugins();
@@ -523,32 +667,72 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const r = await fetch('/api/notifications'); const d = await r.json();
       renderNotifications(d.youtube || []);
+      renderTwitch(d.twitch || []);
     } catch (e) { console.error(e); }
   }
-  
+
+  // Nomes de cargos/canais vêm do Discord e são controláveis por quem tem
+  // "Gerir Cargos" num servidor: têm de ser escapados antes de irem para HTML
+  function channelOptions(selected) {
+    let opts = '<option value="">-- Selecionar Canal --</option>';
+    currentGuilds.forEach(g => {
+      if (g.textChannels.length) { opts += `<optgroup label="${escapeHtml(g.name)}">${g.textChannels.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === selected ? 'selected' : ''}># ${escapeHtml(c.name)}</option>`).join('')}</optgroup>`; }
+    });
+    return opts;
+  }
+
+  function roleOptions(selected) {
+    return '<option value="">-- Sem cargo --</option>' + serverRoles.map(r => `<option value="${escapeHtml(r.id)}" ${r.id === selected ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+  }
+
   function renderNotifications(list) {
     const container = document.getElementById('notificationsList');
+    if (!container) return;
     container.innerHTML = '';
     if (!list.length) {
       container.innerHTML = '<div class="empty-state"><p>Sem canais configurados.</p></div>';
     } else {
-      list.forEach(n => addNotificationRow(n.youtubeId, n.channelId, n.message));
+      // Aceita o formato novo {channelId (YouTube), discordChannelId} e o antigo {youtubeId, channelId}
+      list.forEach(n => {
+        const youtubeId = n.youtubeId || n.channelId;
+        const discordChannelId = n.discordChannelId || (n.youtubeId ? n.channelId : '');
+        addNotificationRow(youtubeId, discordChannelId, n.message, n.roleToPing);
+      });
     }
   }
 
-  function addNotificationRow(youtubeId = '', channelId = '', message = '') {
+  function addNotificationRow(youtubeId = '', discordChannelId = '', message = '', roleToPing = '') {
     const container = document.getElementById('notificationsList');
+    if (!container) return;
     const empty = container.querySelector('.empty-state');
     if (empty) empty.remove();
 
-    let channelOpts = '<option value="">-- Selecionar Canal --</option>';
-    currentGuilds.forEach(g => {
-      if (g.textChannels.length) { channelOpts += `<optgroup label="${g.name}">${g.textChannels.map(c => `<option value="${c.id}" ${c.id === channelId ? 'selected' : ''}># ${c.name}</option>`).join('')}</optgroup>`; }
-    });
+    const row = document.createElement('div');
+    row.className = 'rr-role-row';
+    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${escapeHtml(youtubeId)}"><select class="form-control notif-channel">${channelOptions(discordChannelId)}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem (usa {title} {url})" value="${escapeHtml(message || '')}"><select class="form-control notif-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    container.appendChild(row);
+  }
+
+  function renderTwitch(list) {
+    const container = document.getElementById('twitchList');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!list.length) {
+      container.innerHTML = '<div class="empty-state"><p>Sem canais Twitch.</p></div>';
+    } else {
+      list.forEach(t => addTwitchRow(t.username, t.discordChannelId, t.roleToPing));
+    }
+  }
+
+  function addTwitchRow(username = '', discordChannelId = '', roleToPing = '') {
+    const container = document.getElementById('twitchList');
+    if (!container) return;
+    const empty = container.querySelector('.empty-state');
+    if (empty) empty.remove();
 
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<input type="text" class="form-control notif-ytid" placeholder="ID do Canal YT (ex: UCXXXXX)" value="${youtubeId}"><select class="form-control notif-channel">${channelOpts}</select><input type="text" class="form-control notif-msg" placeholder="Mensagem {url} {title}" value="${message}"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<input type="text" class="form-control tw-name" placeholder="Nome do canal Twitch" value="${escapeHtml(username)}"><select class="form-control tw-channel">${channelOptions(discordChannelId)}</select><select class="form-control tw-role">${roleOptions(roleToPing)}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -559,30 +743,50 @@ document.addEventListener('DOMContentLoaded', () => {
     const youtube = [];
     rows.forEach(row => {
       const youtubeId = row.querySelector('.notif-ytid').value.trim();
-      const channelId = row.querySelector('.notif-channel').value;
+      const discordChannelId = row.querySelector('.notif-channel').value;
       const message = row.querySelector('.notif-msg').value.trim();
-      if (youtubeId && channelId) youtube.push({ youtubeId, channelId, message });
+      const roleToPing = row.querySelector('.notif-role')?.value || '';
+      // só o formato canónico: o plugin continua a aceitar o formato antigo
+      // (channelId) para configs já gravados, mas o painel deixa de escrever os
+      // dois de uma vez, que era o que permitia à divergência voltar
+      if (youtubeId && discordChannelId) youtube.push({ youtubeId, discordChannelId, message, roleToPing });
     });
     const r = await postJson('/api/notifications', { youtube });
     showToast(r.success ? 'Notificações guardadas!' : r.error, !r.success);
+  });
+
+  document.getElementById('btnAddTwitch')?.addEventListener('click', () => addTwitchRow());
+  document.getElementById('formTwitchNotifications')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const rows = document.querySelectorAll('#twitchList .rr-role-row');
+    const twitch = [];
+    rows.forEach(row => {
+      const username = row.querySelector('.tw-name').value.trim();
+      const discordChannelId = row.querySelector('.tw-channel').value;
+      const roleToPing = row.querySelector('.tw-role')?.value || '';
+      if (username && discordChannelId) twitch.push({ username, discordChannelId, roleToPing });
+    });
+    const r = await postJson('/api/notifications', { twitch });
+    showToast(r.success ? 'Notificações Twitch guardadas!' : r.error, !r.success);
   });
 
   function addRrRoleRow() {
     const container = document.getElementById('rrRolesList');
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}</select><input type="text" class="form-control" placeholder="Emoji" style="max-width:60px"><input type="text" class="form-control" placeholder="Label do botão"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select><input type="text" class="form-control" placeholder="Emoji" style="max-width:60px"><input type="text" class="form-control" placeholder="Label do botão"><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
   function renderExistingRR(list) {
     const el = document.getElementById('rrExistingList');
     if (!list.length) { el.innerHTML = '<div class="empty-state"><p>Nenhum painel.</p></div>'; return; }
-    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${rr.title || 'Reaction Roles'}</h5><p>${(rr.roles || []).length} cargos | Canal: ${rr.channelId}</p></div><button class="btn btn-danger btn-sm" onclick="deleteRR('${rr.id}')"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    el.innerHTML = list.map(rr => `<div class="hub-card"><div class="hub-info"><h5>${escapeHtml(rr.title || 'Reaction Roles')}</h5><p>${(rr.roles || []).length} cargos | Canal: ${escapeHtml(rr.channelId)}</p></div><button class="btn btn-danger btn-sm" data-action="delete-rr" data-id="${escapeHtml(rr.id)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
   }
   window.deleteRR = async id => {
-    await fetch(`/api/reaction-roles/${id}`, { method: 'DELETE' });
-    showToast('Painel removido!'); fetchReactionRoles();
+    const res = await fetch(`/api/reaction-roles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Painel removido!')) fetchReactionRoles();
   };
 
   // LEVELS
@@ -599,18 +803,21 @@ document.addEventListener('DOMContentLoaded', () => {
         roles.push({ type: typeSel.value, requirement: parseInt(req.value), roleId: roleSel.value });
       }
     });
-    await postJson('/api/levels/config', {
+    const r = await postJson('/api/levels/config', {
       enabled: getChecked('levelsEnabled'), minXp: parseInt(getVal('levelsMinXp')), maxXp: parseInt(getVal('levelsMaxXp')),
-      xpCooldown: parseInt(getVal('levelsXpCooldown')), announceChannelId: getVal('levelsAnnounceChannel'), roles
+      xpCooldown: parseInt(getVal('levelsXpCooldown')), announceChannelId: getVal('levelsAnnounceChannel'), roles,
+      voiceXpEnabled: getChecked('levelsVoiceEnabled'),
+      voiceXpInterval: parseInt(getVal('levelsVoiceInterval')) || 60,
+      voiceXpAmount: parseInt(getVal('levelsVoiceAmount')) || 5
     });
-    showToast('Níveis guardados!');
+    notifySaved(r, 'Níveis guardados!');
   });
 
   function addLevelRoleRow(type = 'level', reqValue = '', roleId = '') {
     const container = document.getElementById('levelRolesList');
     const row = document.createElement('div');
     row.className = 'rr-role-row';
-    row.innerHTML = `<select class="form-control reward-type" style="max-width:100px"><option value="level" ${type === 'level' ? 'selected' : ''}>Nível</option><option value="xp" ${type === 'xp' ? 'selected' : ''}>XP</option></select><input type="number" class="form-control" placeholder="Requisito" min="1" value="${reqValue}" style="max-width:100px"><select class="form-control reward-role"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${r.id}" ${r.id === roleId ? 'selected' : ''}>${r.name}</option>`).join('')}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
+    row.innerHTML = `<select class="form-control reward-type" style="max-width:100px"><option value="level" ${type === 'level' ? 'selected' : ''}>Nível</option><option value="xp" ${type === 'xp' ? 'selected' : ''}>XP</option></select><input type="number" class="form-control" placeholder="Requisito" min="1" value="${escapeHtml(reqValue)}" style="max-width:100px"><select class="form-control reward-role"><option value="">Cargo</option>${serverRoles.map(r => `<option value="${escapeHtml(r.id)}" ${r.id === roleId ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select><button type="button" class="btn btn-danger" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>`;
     container.appendChild(row);
   }
 
@@ -630,7 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const el = document.getElementById('leaderboardList');
       const medals = ['🥇', '🥈', '🥉'];
       if (!d.length) { el.innerHTML = '<div class="empty-state"><p>Sem dados de XP.</p></div>'; return; }
-      el.innerHTML = d.map((e, i) => `<div class="leaderboard-entry"><span class="leaderboard-rank">${i < 3 ? medals[i] : '#' + (i + 1)}</span><div class="leaderboard-info"><h5>${e.user_id}</h5><span>Nível ${e.level} | ${e.total_messages} msgs</span></div><span class="leaderboard-xp">${e.xp} XP</span></div>`).join('');
+      el.innerHTML = d.map((e, i) => `<div class="leaderboard-entry"><span class="leaderboard-rank">${i < 3 ? medals[i] : '#' + (i + 1)}</span><div class="leaderboard-info"><h5>${escapeHtml(e.user_id)}</h5><span>Nível ${escapeHtml(e.level)} | ${escapeHtml(e.total_messages)} msgs</span></div><span class="leaderboard-xp">${escapeHtml(e.xp)} XP</span></div>`).join('');
     } catch (e) { console.error(e); }
   }
 
@@ -661,12 +868,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/scheduled-messages/${guildId}`); const d = await r.json();
       const el = document.getElementById('scheduledList');
       if (!d.length) { el.innerHTML = '<div class="empty-state"><p>Sem agendados.</p></div>'; return; }
-      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${m.content?.substring(0, 50) || 'Embed'}</h5><span>Cron: ${m.cron_expression || 'One-shot'} | Canal: ${m.channel_id}</span></div><button class="btn btn-danger btn-sm" onclick="deleteSched(${m.id})"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+      el.innerHTML = d.map(m => `<div class="scheduled-card"><div class="sched-info"><h5>${escapeHtml(m.content?.substring(0, 50) || 'Embed')}</h5><span>Cron: ${escapeHtml(m.cron_expression || 'One-shot')} | Canal: ${escapeHtml(m.channel_id)}</span></div><button class="btn btn-danger btn-sm" data-action="delete-sched" data-id="${escapeHtml(m.id)}"><i class="fa-solid fa-trash"></i></button></div>`).join('');
     } catch (e) { console.error(e); }
   }
   window.deleteSched = async id => {
-    await fetch(`/api/scheduled-messages/${id}`, { method: 'DELETE' });
-    showToast('Removido!'); loadScheduled();
+    const res = await fetch(`/api/scheduled-messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await res.json().catch(() => ({ success: false, error: 'Resposta inválida.' }));
+    if (notifySaved(r, 'Removido!')) loadScheduled();
   };
 
   // GIVEAWAYS
@@ -676,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const r = await fetch(`/api/giveaways/${guildId}`); const d = await r.json();
       const el = document.getElementById('giveawaysList');
       if (!d.length) { el.innerHTML = '<div class="empty-state"><i class="fa-solid fa-gift"></i><p>Sem sorteios.</p></div>'; return; }
-      el.innerHTML = d.map(g => `<div class="giveaway-card"><div class="giveaway-info"><h5>🎉 ${g.prize}</h5><span>${g.winners_count} vencedor(es) | Termina: ${new Date(g.ends_at).toLocaleString('pt-PT')}</span></div><span class="giveaway-status ${g.ended ? 'ended' : 'active'}">${g.ended ? 'Terminado' : 'Ativo'}</span></div>`).join('');
+      el.innerHTML = d.map(g => `<div class="giveaway-card"><div class="giveaway-info"><h5>🎉 ${escapeHtml(g.prize)}</h5><span>${escapeHtml(g.winners_count)} vencedor(es) | Termina: ${new Date(g.ends_at).toLocaleString('pt-PT')}</span></div><span class="giveaway-status ${g.ended ? 'ended' : 'active'}">${g.ended ? 'Terminado' : 'Ativo'}</span></div>`).join('');
     } catch (e) { console.error(e); }
   }
 
@@ -715,7 +923,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formBotToken').addEventListener('submit', async e => {
     e.preventDefault();
     const token = getVal('botTokenInput'); if (!token) return showToast('Insere um token!', true);
-    await postJson('/api/config', { token });
+    const r = await postJson('/api/config', { token });
+    if (!r.success) return showToast(r.error || 'Falha ao guardar o token.', true);
     showToast('Token guardado! Bot a reiniciar...'); setTimeout(loadAllData, 3000);
   });
 
@@ -729,8 +938,8 @@ document.addEventListener('DOMContentLoaded', () => {
         activityType: getVal('presenceType'),
         activityText: getVal('presenceText')
       };
-      await postJson('/api/presence', payload);
-      showToast('Status atualizado!');
+      const r = await postJson('/api/presence', payload);
+      notifySaved(r, 'Status atualizado!');
       fetchStatus();
     });
   }
@@ -744,9 +953,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const pw = getVal('webPassword');
     if (pw) payload.password = pw;
     
-    await postJson('/api/web-settings', payload);
-    showToast('Definições guardadas!');
-    setVal('webPassword', '');
+    const r = await postJson('/api/web-settings', payload);
+    notifySaved(r, 'Definições guardadas!');
+    if (r.success) setVal('webPassword', '');
   });
 
   // BACKUP & RESTORE
@@ -755,7 +964,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnBackup.addEventListener('click', async () => {
       try {
         const res = await fetch('/api/backup');
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.config) {
+          throw new Error(data && data.error ? data.error : `O servidor não devolveu um backup (HTTP ${res.status}).`);
+        }
         const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -785,6 +997,7 @@ document.addEventListener('DOMContentLoaded', () => {
           
           if (confirm('Atenção: Restaurar um backup vai substituir todas as tuas configurações e dados atuais, e reiniciar o bot. Tens a certeza?')) {
             const r = await postJson('/api/restore', content);
+            if (!r.success) return showToast(r.error || 'Falha ao restaurar.', true);
             showToast(r.message || 'Restaurado! A reiniciar...');
             setTimeout(() => location.reload(), 3000);
           }
@@ -800,13 +1013,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (formAutoBackup) {
     formAutoBackup.addEventListener('submit', async e => {
       e.preventDefault();
-      await postJson('/api/config', { 
-        backup: { 
+      const r = await postJson('/api/config', {
+        backup: {
           autoBackup: getChecked('backupAutoEnabled'), 
           channelId: getVal('backupChannelSelect') 
         } 
       });
-      showToast('Configurações de backup guardadas!');
+      showToast(r.success ? 'Configurações de backup guardadas!' : (r.error || 'Falha ao guardar.'), !r.success);
     });
   }
 
@@ -856,7 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (log.type === 'warn') color = '#e8c374';
           if (log.type === 'error') color = '#ed4245';
           const timeStr = new Date(log.time).toLocaleTimeString('pt-PT');
-          return `<div style="color: ${color}; margin-bottom: 4px;">[${timeStr}] [${log.type.toUpperCase()}] ${log.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+          return `<div style="color: ${color}; margin-bottom: 4px;">[${timeStr}] [${log.type.toUpperCase()}] ${escapeHtml(log.message)}</div>`;
         }).join('');
         // Scroll to bottom
         terminal.scrollTop = terminal.scrollHeight;
@@ -873,6 +1086,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 3000); // Polling faster for logs, 3 seconds
 
   // HELPERS
+  // Resultado REAL do pedido (em vez de assumir que gravou)
+  function notifySaved(r, okMessage) {
+    if (r && r.success) {
+      showToast(okMessage);
+      return true;
+    }
+    showToast((r && r.error) || 'Falha ao guardar.', true);
+    return false;
+  }
+
   async function postJson(url, body) {
     try {
       const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

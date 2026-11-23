@@ -4,7 +4,7 @@ const { getConfig, updateConfig, saveConfig } = require('../utils/config');
 const { client, getBotStatus, initBot } = require('../bot/client');
 const fs = require('fs');
 const path = require('path');
-const { getInstalledPlugins, installPluginFromGithub, deletePlugin, USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR } = require('../utils/pluginManager');
+const { getInstalledPlugins, installPluginFromGithub, deletePlugin, getPluginPath, USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR } = require('../utils/pluginManager');
 
 const router = express.Router();
 
@@ -39,7 +39,9 @@ router.post('/plugins/toggle', (req, res) => {
   const config = getConfig();
   if (!config.plugins) config.plugins = {};
   config.plugins[pluginId] = enabled;
-  updateConfig({ plugins: config.plugins });
+  if (!updateConfig({ plugins: config.plugins })) {
+    return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+  }
   res.json({ success: true });
 });
 
@@ -48,8 +50,65 @@ router.delete('/plugins/:id', (req, res) => {
   res.json(result);
 });
 
-// Servir ficheiros estáticos da pasta ui/ dos plugins (tab.html, script.js)
-router.use('/plugins-ui', express.static(USER_PLUGINS_DIR), express.static(OFFICIAL_PLUGINS_DIR));
+// Serve APENAS a pasta ui/ dos plugins instalados. Antes, express.static nas
+// raízes de data/plugins e plugins/ expunha index.js, plugin.json e
+// node_modules de qualquer plugin a quem tivesse sessão no painel.
+const PLUGIN_ID_RE = /^[A-Za-z0-9._-]+$/;
+
+router.get('/plugins-ui/:folderId/ui/:asset(*)', (req, res) => {
+  try {
+    const folderId = req.params.folderId;
+    if (!PLUGIN_ID_RE.test(folderId) || folderId === '..' || folderId === '.') {
+      return res.status(400).json({ success: false, error: 'Identificador de plugin inválido.' });
+    }
+
+    const base = getPluginPath(folderId);
+    if (!base) return res.status(404).json({ success: false, error: 'Plugin não encontrado.' });
+
+    const uiDir = path.resolve(base, 'ui');
+    const target = path.resolve(uiDir, req.params.asset || '');
+    if (target !== uiDir && !target.startsWith(uiDir + path.sep)) {
+      return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
+    }
+
+    // realpath em toda a cadeia: bloqueia symlinks, incluindo a hipótese de a
+    // própria pasta ui/ (ou a do plugin) apontar para fora das raízes autorizadas
+    const realRoots = [USER_PLUGINS_DIR, OFFICIAL_PLUGINS_DIR]
+      .map(root => { try { return fs.realpathSync(root); } catch (err) { return path.resolve(root); } });
+    const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
+    let realBase, realUiDir;
+    try {
+      realBase = fs.realpathSync(base);
+      realUiDir = fs.realpathSync(uiDir);
+    } catch (err) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
+    }
+    if (!realRoots.some(root => inside(realBase, root))) {
+      return res.status(403).json({ success: false, error: 'Pasta do plugin fora das raízes autorizadas.' });
+    }
+    // a pasta ui/ tem de ser uma SUBPASTA real do plugin (igualdade aceitaria uma
+    // ui/ redirecionada para a própria pasta do plugin, expondo index.js etc.)
+    if (!inside(realUiDir, realBase) || realUiDir === realBase) {
+      return res.status(403).json({ success: false, error: 'A pasta ui/ do plugin aponta para fora do plugin.' });
+    }
+    // só depois de garantir a contenção das pastas é que se resolve o alvo
+    let realTarget;
+    try {
+      realTarget = fs.realpathSync(target);
+    } catch (err) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
+    }
+    if (!inside(realTarget, realUiDir)) {
+      return res.status(403).json({ success: false, error: 'Caminho fora da pasta ui/ do plugin.' });
+    }
+    if (!fs.statSync(realTarget).isFile()) {
+      return res.status(404).json({ success: false, error: 'Ficheiro não encontrado.' });
+    }
+    res.sendFile(realTarget);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/status - Status do bot
 router.get('/status', (req, res) => {
@@ -59,10 +118,13 @@ router.get('/status', (req, res) => {
 // GET /api/config - Configurações atuais
 router.get('/config', (req, res) => {
   const config = getConfig();
-  // Esconder token parcialmente para segurança
+  // Esconder segredos: o token mascarado e as credenciais do painel / session
+  // secret nunca saem para o browser (a cópia integral continua em /api/backup)
   const safeConfig = {
     ...config,
-    token: config.token ? `••••••••••••${config.token.slice(-4)}` : ''
+    token: config.token ? `••••••••••••${config.token.slice(-4)}` : '',
+    webAuth: config.webAuth ? { username: config.webAuth.username, password: '••••••••' } : null,
+    sessionSecret: undefined
   };
   res.json(safeConfig);
 });
@@ -71,18 +133,32 @@ router.get('/config', (req, res) => {
 router.post('/config', (req, res) => {
   try {
     const currentConfig = getConfig();
-    const { token, joinMessage, leaveMessage, voiceHubs } = req.body;
+    const { token, joinMessage, leaveMessage, voiceHubs, backup } = req.body;
 
     const updates = {};
 
     if (joinMessage) updates.joinMessage = { ...currentConfig.joinMessage, ...joinMessage };
     if (leaveMessage) updates.leaveMessage = { ...currentConfig.leaveMessage, ...leaveMessage };
     if (voiceHubs) updates.voiceHubs = voiceHubs;
+    if (backup) updates.backup = { ...(currentConfig.backup || {}), ...backup };
 
     if (token && token.trim() !== '' && !token.includes('••••')) {
       updates.token = token.trim();
-      process.env.DISCORD_TOKEN = token.trim();
-      // Tentar reiniciar o bot com o novo token
+    }
+
+    const updated = updateConfig(updates);
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
+
+    // O ambiente só muda com a gravação confirmada (senão um 500 deixava o
+    // processo com um token que não está em lado nenhum persistente)
+    if (updates.token) {
+      process.env.DISCORD_TOKEN = updates.token;
+    }
+
+    if (updates.token) {
+      // Reinicia o bot só depois de o token estar gravado
       client.destroy().then(() => {
         initBot();
       }).catch(() => {
@@ -90,8 +166,7 @@ router.post('/config', (req, res) => {
       });
     }
 
-    const updated = updateConfig(updates);
-    res.json({ success: true, config: updated });
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -102,7 +177,9 @@ router.post('/presence', (req, res) => {
   try {
     const { status, activityType, activityText } = req.body;
     const updates = { presence: { status, activityType, activityText } };
-    updateConfig(updates);
+    if (!updateConfig(updates)) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     
     if (client.user) {
       const typeMap = {
@@ -239,7 +316,9 @@ router.post('/hubs', (req, res) => {
       voiceHubs.push(hubItem);
     }
 
-    updateConfig({ voiceHubs });
+    if (!updateConfig({ voiceHubs })) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     res.json({ success: true, voiceHubs });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -253,7 +332,9 @@ router.delete('/hubs/:id', (req, res) => {
     const config = getConfig();
     let voiceHubs = config.voiceHubs || [];
     voiceHubs = voiceHubs.filter(h => h.id !== id && h.channelId !== id);
-    updateConfig({ voiceHubs });
+    if (!updateConfig({ voiceHubs })) {
+      return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+    }
     res.json({ success: true, voiceHubs });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

@@ -11,6 +11,15 @@ const {
 
 const router = express.Router();
 
+// Confirma a gravação em disco em vez de assumir sucesso (updateConfig devolve
+// null quando saveConfig falha)
+function savedOr500(res, saved, payload = { success: true }) {
+  if (!saved) {
+    return res.status(500).json({ success: false, error: 'Falha ao gravar a configuração em disco.' });
+  }
+  return res.json(payload);
+}
+
 // ================================
 // MODERAÇÃO — Configuração de Auto-Mod
 // ================================
@@ -34,8 +43,7 @@ router.get('/moderation', (req, res) => {
 router.post('/moderation', (req, res) => {
   const updates = req.body;
   const config = getConfig();
-  updateConfig({ moderation: { ...(config.moderation || {}), ...updates } });
-  res.json({ success: true });
+  savedOr500(res, updateConfig({ moderation: { ...(config.moderation || {}), ...updates } }));
 });
 
 // GET /api/warnings/:guildId
@@ -65,8 +73,7 @@ router.get('/audit-log', (req, res) => {
 router.post('/audit-log', (req, res) => {
   const updates = req.body;
   const config = getConfig();
-  updateConfig({ auditLog: { ...(config.auditLog || {}), ...updates } });
-  res.json({ success: true });
+  savedOr500(res, updateConfig({ auditLog: { ...(config.auditLog || {}), ...updates } }));
 });
 
 // ================================
@@ -86,8 +93,7 @@ router.get('/tickets/config', (req, res) => {
 // POST /api/tickets/config
 router.post('/tickets/config', (req, res) => {
   const config = getConfig();
-  updateConfig({ tickets: { ...(config.tickets || {}), ...req.body } });
-  res.json({ success: true });
+  savedOr500(res, updateConfig({ tickets: { ...(config.tickets || {}), ...req.body } }));
 });
 
 // GET /api/tickets/open/:guildId
@@ -159,9 +165,7 @@ router.post('/reaction-roles', async (req, res) => {
       roles,
       createdAt: new Date().toISOString()
     });
-    updateConfig({ reactionRoles });
-
-    res.json({ success: true, messageId: msg.id });
+    savedOr500(res, updateConfig({ reactionRoles }), { success: true, messageId: msg.id });
   } catch (err) {
     console.error('[RR] Erro ao criar reaction roles:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -173,8 +177,7 @@ router.delete('/reaction-roles/:id', (req, res) => {
   const config = getConfig();
   let reactionRoles = config.reactionRoles || [];
   reactionRoles = reactionRoles.filter(rr => rr.id !== req.params.id);
-  updateConfig({ reactionRoles });
-  res.json({ success: true });
+  savedOr500(res, updateConfig({ reactionRoles }));
 });
 
 // ================================
@@ -197,8 +200,7 @@ router.get('/levels/config', (req, res) => {
 // POST /api/levels/config
 router.post('/levels/config', (req, res) => {
   const config = getConfig();
-  updateConfig({ levels: { ...(config.levels || {}), ...req.body } });
-  res.json({ success: true });
+  savedOr500(res, updateConfig({ levels: { ...(config.levels || {}), ...req.body } }));
 });
 
 // GET /api/levels/leaderboard/:guildId
@@ -263,7 +265,13 @@ router.get('/scheduled-messages/:guildId', (req, res) => {
 
 // DELETE /api/scheduled-messages/:id
 router.delete('/scheduled-messages/:id', (req, res) => {
-  deleteScheduledMessage(parseInt(req.params.id));
+  const removed = deleteScheduledMessage(parseInt(req.params.id));
+  if (!removed) {
+    return res.status(500).json({ success: false, error: 'Falha ao remover o agendamento (erro na base de dados).' });
+  }
+  if (removed.changes === 0) {
+    return res.status(404).json({ success: false, error: 'Agendamento não encontrado.' });
+  }
   res.json({ success: true });
 });
 
@@ -291,8 +299,10 @@ router.get('/stats/:guildId', (req, res) => {
   const daily = getMessageStatsPerDay(guildId, 30);
   const memberHistory = getMemberHistory(guildId, 30);
 
-  // Resolver nomes de canais
-  const guild = client.guilds.cache.first();
+  // Resolver nomes de canais: usar o servidor PEDIDO (com o bot em vários
+  // servidores, .first() dava nomes do servidor errado — ou o id quando não
+  // estava na cache)
+  const guild = client.guilds.cache.get(guildId);
   const topChannelsNamed = topChannels.map(tc => {
     const ch = guild?.channels.cache.get(tc.channel_id);
     return { ...tc, name: ch ? `#${ch.name}` : tc.channel_id };
@@ -342,8 +352,7 @@ router.post('/web-settings', (req, res) => {
     }
   }
 
-  updateConfig(updates);
-  res.json({ success: true });
+  savedOr500(res, updateConfig(updates));
 });
 
 // ================================
@@ -352,7 +361,10 @@ router.post('/web-settings', (req, res) => {
 
 // GET /api/roles
 router.get('/roles', (req, res) => {
-  const guild = client.guilds.cache.first();
+  // ?guildId é opcional: com o bot em vários servidores, .first() dava sempre os
+  // cargos do mesmo servidor, independentemente do que o painel está a editar
+  const guild = (req.query.guildId && client.guilds.cache.get(req.query.guildId))
+    || client.guilds.cache.first();
   if (!guild) return res.json([]);
 
   const roles = guild.roles.cache
@@ -365,7 +377,8 @@ router.get('/roles', (req, res) => {
 
 // GET /api/categories
 router.get('/categories', (req, res) => {
-  const guild = client.guilds.cache.first();
+  const guild = (req.query.guildId && client.guilds.cache.get(req.query.guildId))
+    || client.guilds.cache.first();
   if (!guild) return res.json([]);
 
   const categories = guild.channels.cache
@@ -379,11 +392,17 @@ router.get('/categories', (req, res) => {
 router.get('/backup', (req, res) => {
   const fs = require('fs');
   const path = require('path');
+  const { flushNow } = require('../utils/database');
   const DATA_DIR = path.join(__dirname, '../../data');
-  const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-  const DB_PATH = path.join(DATA_DIR, 'data.db');
+  // Alinhado com src/utils/config.js e src/utils/database.js: respeita
+  // CONFIG_PATH/DB_PATH do ambiente (ex.: verify, setups não-padrão).
+  const CONFIG_PATH = process.env.CONFIG_PATH || path.join(DATA_DIR, 'config.json');
+  const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'data.db');
 
   try {
+    // as escritas de estatísticas/XP podem estar em fila (até 2 s): garantir que
+    // o backup apanha tudo o que o processo já aceitou
+    flushNow();
     const backup = {
       config: fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '{}',
       database: fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH).toString('base64') : ''
@@ -395,36 +414,124 @@ router.get('/backup', (req, res) => {
 });
 
 // POST /api/restore
-router.post('/restore', (req, res) => {
+router.post('/restore', async (req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const { shutdownDb } = require('../utils/database');
+  const { getDb, shutdownDb, abortShutdown, validateDbBuffer } = require('../utils/database');
+  const { saveConfig } = require('../utils/config');
   const DATA_DIR = path.join(__dirname, '../../data');
   const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
   const DB_PATH = path.join(DATA_DIR, 'data.db');
 
+  const badRequest = message => Object.assign(new Error(message), { status: 400 });
+  const ioError = message => Object.assign(new Error(message), { status: 500 });
+
   try {
-    const { config, database } = req.body;
+    const { config, database } = req.body || {};
 
-    shutdownDb();
-
-    if (config) {
-      fs.writeFileSync(CONFIG_PATH, config, 'utf8');
+    // 1) VALIDAR ANTES de tocar em seja o que for: um backup partido não pode
+    // deixar o painel sem credenciais nem a base de dados corrompida
+    let parsedConfig = null;
+    if (config !== undefined && config !== null && config !== '') {
+      try {
+        parsedConfig = typeof config === 'string' ? JSON.parse(config) : config;
+      } catch (err) {
+        throw badRequest(`Backup inválido: "config" não é JSON (${err.message}).`);
+      }
+      if (typeof parsedConfig !== 'object' || parsedConfig === null || Array.isArray(parsedConfig)) {
+        throw badRequest('Backup inválido: "config" tem de ser um objeto JSON.');
+      }
+      // o anexo do backup automático do Discord traz uma nota informativa que
+      // não pertence ao config
+      delete parsedConfig._backupNota;
     }
+
+    let dbBuffer = null;
     if (database) {
-      const dbBuffer = Buffer.from(database, 'base64');
-      fs.writeFileSync(DB_PATH, dbBuffer);
+      // garante que o módulo sql.js está carregado antes de validar (senão um
+      // backup perfeitamente válido era rejeitado com "ainda não inicializada")
+      await getDb();
+      dbBuffer = Buffer.from(String(database), 'base64');
+      if (dbBuffer.length === 0) throw badRequest('Backup inválido: a base de dados está vazia.');
+      if (dbBuffer.subarray(0, 15).toString('utf8') !== 'SQLite format 3') {
+        throw badRequest('Backup inválido: a base de dados não é um ficheiro SQLite válido.');
+      }
+      const check = validateDbBuffer(dbBuffer);
+      if (!check.ok) throw badRequest(`Backup inválido: ${check.error}`);
+    }
+
+    if (!parsedConfig && !dbBuffer) {
+      throw badRequest('Backup sem "config" nem "database" para restaurar.');
+    }
+
+    // 2) O backup automático do Discord vem SEM segredos (token, credenciais do
+    // painel, session secret): preservamos os atuais para o painel não ficar
+    // inacessível depois de um restauro.
+    if (parsedConfig) {
+      const current = getConfig();
+      if (!parsedConfig.token) parsedConfig.token = current.token;
+      if (!parsedConfig.webAuth || !parsedConfig.webAuth.password) parsedConfig.webAuth = current.webAuth;
+      if (!parsedConfig.sessionSecret) parsedConfig.sessionSecret = current.sessionSecret;
+    }
+
+    // 3) Só agora escrevemos. Primeiro o ficheiro novo da BD para um temporário
+    // (falhar aqui não altera nada); depois o config; por fim fechamos a BD e
+    // fazemos rename. Se algo falhar a meio, repomos o config anterior — sem isto
+    // um 500 deixava metade do restauro aplicado.
+    const tmpDb = `${DB_PATH}.restore`;
+    const previousConfigRaw = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : null;
+    if (dbBuffer) {
+      try {
+        fs.writeFileSync(tmpDb, dbBuffer);
+      } catch (err) {
+        throw ioError(`Falha ao preparar a base de dados restaurada: ${err.message}`);
+      }
+    }
+
+    let dbStopped = false;
+    let configApplied = false;
+    try {
+      if (parsedConfig && !saveConfig(parsedConfig)) {
+        throw ioError('Falha ao gravar o config restaurado em disco.');
+      }
+      if (parsedConfig) configApplied = true;
+
+      if (dbBuffer) {
+        shutdownDb();
+        dbStopped = true;
+        fs.renameSync(tmpDb, DB_PATH);
+      }
+    } catch (err) {
+      if (dbStopped) abortShutdown();
+      if (configApplied && previousConfigRaw !== null) {
+        try {
+          const rollbackTmp = `${CONFIG_PATH}.rollback`;
+          fs.writeFileSync(rollbackTmp, previousConfigRaw, 'utf8');
+          fs.renameSync(rollbackTmp, CONFIG_PATH);
+          console.error('[RESTORE] Config reposto no estado anterior.');
+        } catch (rbErr) {
+          console.error('[RESTORE] Não foi possível repor o config anterior:', rbErr.message);
+        }
+      }
+      throw err instanceof Error && err.status ? err : ioError(`Falha ao aplicar o restauro: ${err.message}`);
+    } finally {
+      if (dbBuffer && fs.existsSync(tmpDb)) {
+        try { fs.unlinkSync(tmpDb); } catch (err) { /* não é crítico */ }
+      }
     }
 
     res.json({ success: true, message: 'Restauro concluído! A reiniciar o sistema...' });
 
+    // Janela mínima: as escritas ficam suspensas até o processo morrer, por isso
+    // cada segundo aqui é trabalho perdido (e o runSql já as recusa)
     setTimeout(() => {
       console.log('[SYSTEM] A reiniciar por pedido de restauro...');
       process.exit(0);
-    }, 2000);
+    }, 300);
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    const status = error && error.status ? error.status : 400;
+    res.status(status).json({ success: false, error: error.message });
   }
 });
 
@@ -432,14 +539,19 @@ router.post('/restore', (req, res) => {
 router.post('/commands/register', async (req, res) => {
   const { registerCommands } = require('../bot/commands/register');
   const config = getConfig();
-  
-  if (!client.user || !config.token) {
+
+  // Mesma resolução de credenciais usada no arranque (senão um DISCORD_TOKEN de
+  // ambiente era ignorado e o registo falhava com o token do config)
+  const clientId = process.env.CLIENT_ID || config.clientId || client.user?.id;
+  const token = process.env.DISCORD_TOKEN || config.token;
+
+  if (!client.user || !clientId || !token) {
     return res.status(400).json({ success: false, error: 'O bot não está online ou falta o token.' });
   }
 
   try {
-    await registerCommands(client.user.id, config.token);
-    res.json({ success: true, message: 'Comandos Slash registados com sucesso!' });
+    const result = await registerCommands(clientId, token);
+    res.json({ success: true, message: `Comandos Slash registados com sucesso! (${result.registered})` });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -457,21 +569,32 @@ router.post('/custom-commands', (req, res) => {
   if (!Array.isArray(commands)) {
     return res.status(400).json({ success: false, error: 'Formato inválido.' });
   }
-  updateConfig({ customCommands: commands });
-  res.json({ success: true, message: 'Comandos atualizados.' });
+  savedOr500(res, updateConfig({ customCommands: commands }), { success: true, message: 'Comandos atualizados.' });
 });
 
 // GET /api/notifications
 router.get('/notifications', (req, res) => {
   const config = getConfig();
-  res.json(config.notifications || { youtube: [] });
+  const notifications = config.notifications || {};
+  res.json({
+    youtube: notifications.youtube || [],
+    twitch: notifications.twitch || []
+  });
 });
 
-// POST /api/notifications
+// POST /api/notifications — faz merge para não apagar a plataforma que o UI não mostra
 router.post('/notifications', (req, res) => {
-  const notifications = req.body;
-  updateConfig({ notifications });
-  res.json({ success: true, message: 'Notificações atualizadas.' });
+  const config = getConfig();
+  const current = config.notifications || {};
+  const incoming = req.body || {};
+  const saved = updateConfig({
+    notifications: {
+      ...current,
+      ...(Array.isArray(incoming.youtube) ? { youtube: incoming.youtube } : {}),
+      ...(Array.isArray(incoming.twitch) ? { twitch: incoming.twitch } : {})
+    }
+  });
+  savedOr500(res, saved, { success: true, message: 'Notificações atualizadas.' });
 });
 
 // GET /api/modules
@@ -483,8 +606,7 @@ router.get('/modules', (req, res) => {
 // POST /api/modules
 router.post('/modules', (req, res) => {
   const modules = req.body;
-  updateConfig({ modules });
-  res.json({ success: true, message: 'Módulos atualizados com sucesso.' });
+  savedOr500(res, updateConfig({ modules }), { success: true, message: 'Módulos atualizados com sucesso.' });
 });
 
 module.exports = router;

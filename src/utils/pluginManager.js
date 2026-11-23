@@ -26,6 +26,8 @@ function scanPluginsDir(dir, isOfficial) {
           const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
           meta.folderId = folder.name;
           meta.isOfficial = isOfficial;
+          // Plugins podem trazer a sua própria aba na Dashboard (ui/tab.html)
+          meta.hasUi = fs.existsSync(path.join(pluginPath, 'ui', 'tab.html'));
           found.push(meta);
         } catch (e) {
           console.error(`[PLUGIN MANAGER] Erro ao ler plugin.json do plugin ${folder.name}:`, e.message);
@@ -37,6 +39,10 @@ function scanPluginsDir(dir, isOfficial) {
 }
 
 function getPluginPath(folderId) {
+  // Identificadores vêm de parâmetros de API: nada de separadores ou traversal
+  if (typeof folderId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(folderId) || folderId === '.' || folderId === '..') {
+    return null;
+  }
   const userPath = path.join(USER_PLUGINS_DIR, folderId);
   if (fs.existsSync(path.join(userPath, 'plugin.json'))) return userPath;
   const officialPath = path.join(OFFICIAL_PLUGINS_DIR, folderId);
@@ -58,6 +64,7 @@ function getInstalledPlugins() {
 }
 
 function installPluginFromGithub(url) {
+  let pluginPath = null;
   try {
     // 1. Validar URL básico
     if (!url.startsWith('https://github.com/')) {
@@ -69,7 +76,12 @@ function installPluginFromGithub(url) {
     let repoName = parts[parts.length - 1];
     if (repoName.endsWith('.git')) repoName = repoName.slice(0, -4);
 
-    const pluginPath = path.join(USER_PLUGINS_DIR, repoName);
+    // O nome vira caminho no disco: rejeita tudo o que possa fazer traversal
+    if (!/^[A-Za-z0-9._-]+$/.test(repoName) || repoName === '.' || repoName === '..') {
+      throw new Error('Nome de repositório inválido.');
+    }
+
+    pluginPath = path.join(USER_PLUGINS_DIR, repoName);
 
     // 3. Clonar repositório
     if (fs.existsSync(pluginPath)) {
@@ -77,7 +89,7 @@ function installPluginFromGithub(url) {
     }
 
     console.log(`[PLUGIN MANAGER] A clonar repositório: ${url}`);
-    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit' });
+    execFileSync('git', ['clone', url, pluginPath], { stdio: 'inherit', timeout: 300000 });
 
     // 4. Validar Licença Open-Source
     const licenseFiles = ['LICENSE', 'LICENSE.md', 'LICENSE.txt'];
@@ -111,7 +123,7 @@ function installPluginFromGithub(url) {
     const packagePath = path.join(pluginPath, 'package.json');
     if (fs.existsSync(packagePath)) {
       console.log(`[PLUGIN MANAGER] A instalar dependências para o plugin ${repoName}...`);
-      execFileSync('npm', ['install'], { cwd: pluginPath, stdio: 'inherit' });
+      execFileSync('npm', ['install'], { cwd: pluginPath, stdio: 'inherit', timeout: 300000 });
     }
 
     // 5. Validar se existe plugin.json
@@ -130,6 +142,14 @@ function installPluginFromGithub(url) {
     return { success: true, pluginId: repoName };
   } catch (error) {
     console.error(`[PLUGIN MANAGER] Falha ao instalar plugin:`, error.message);
+    // git clone pode deixar metade do repositório em disco (timeout, rede partida,
+    // repo sem LICENSE): sem limpeza, a pasta fica órfã e a nova tentativa falha
+    // com "já existe".
+    if (pluginPath && fs.existsSync(pluginPath)) {
+      try { fs.rmSync(pluginPath, { recursive: true, force: true }); } catch (err) {
+        console.error('[PLUGIN MANAGER] Não foi possível remover a instalação incompleta:', err.message);
+      }
+    }
     return { success: false, error: error.message };
   }
 }
@@ -140,7 +160,12 @@ function deletePlugin(pluginId) {
     if (!pluginPath) {
       return { success: false, error: 'Plugin não encontrado' };
     }
-    if (fs.existsSync(path.join(OFFICIAL_PLUGINS_DIR, pluginId, 'plugin.json'))) {
+    // O teste é pelo caminho RESOLVIDO: com um plugin de utilizador a
+    // sobrepor-se a um oficial (mesmo folderId), o caminho é o do utilizador e
+    // apagar isso é legítimo — antes ficava impossível de remover.
+    const resolved = path.resolve(pluginPath);
+    const officialRoot = path.resolve(OFFICIAL_PLUGINS_DIR);
+    if (resolved === officialRoot || resolved.startsWith(officialRoot + path.sep)) {
       return { success: false, error: 'Plugins oficiais não podem ser removidos.' };
     }
     fs.rmSync(pluginPath, { recursive: true, force: true });
@@ -159,23 +184,28 @@ function getActivePlugins() {
 
 // Carrega a lógica dos plugins (previne carregamento duplicado)
 const loadedPlugins = new Set();
+// Guarda os comandos de cada plugin já carregado, para que possamos voltar a
+// registar os slash commands sem voltar a carregar (require) os plugins.
+const pluginCommands = new Map();
 
 function loadPlugins(client, app) {
   const activePlugins = getActivePlugins();
   let allCommands = [];
 
   for (const plugin of activePlugins) {
+    const pluginBasePath = getPluginPath(plugin.folderId);
+    if (!pluginBasePath) {
+      console.error(`[PLUGIN MANAGER] Caminho do plugin '${plugin.folderId}' não encontrado.`);
+      continue;
+    }
+
     if (loadedPlugins.has(plugin.folderId)) {
-      console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' já carregado, a saltar...`);
+      console.log(`[PLUGIN MANAGER] Plugin '${plugin.name}' já carregado, a reutilizar os seus comandos...`);
+      allCommands = allCommands.concat(pluginCommands.get(plugin.folderId) || []);
       continue;
     }
 
     try {
-      const pluginBasePath = getPluginPath(plugin.folderId);
-      if (!pluginBasePath) {
-        console.error(`[PLUGIN MANAGER] Caminho do plugin '${plugin.folderId}' não encontrado.`);
-        continue;
-      }
       const pluginPath = path.join(pluginBasePath, 'index.js');
       if (fs.existsSync(pluginPath)) {
         const logic = require(pluginPath);
@@ -194,6 +224,7 @@ function loadPlugins(client, app) {
         }
         
         if (logic.commands) {
+          pluginCommands.set(plugin.folderId, logic.commands);
           allCommands = allCommands.concat(logic.commands);
         }
 
@@ -211,12 +242,23 @@ function loadPlugins(client, app) {
   return allCommands;
 }
 
+// Devolve apenas os comandos dos plugins atualmente ativos
+function getPluginCommands() {
+  const active = new Set(getActivePlugins().map(p => p.folderId));
+  let commands = [];
+  for (const [folderId, cmds] of pluginCommands.entries()) {
+    if (active.has(folderId)) commands = commands.concat(cmds);
+  }
+  return commands;
+}
+
 function isPluginLoaded(folderId) {
   return loadedPlugins.has(folderId);
 }
 
 function clearLoadedPlugins() {
   loadedPlugins.clear();
+  pluginCommands.clear();
 }
 
 module.exports = {
@@ -225,6 +267,7 @@ module.exports = {
   getActivePlugins,
   deletePlugin,
   loadPlugins,
+  getPluginCommands,
   isPluginLoaded,
   clearLoadedPlugins,
   getPluginPath,

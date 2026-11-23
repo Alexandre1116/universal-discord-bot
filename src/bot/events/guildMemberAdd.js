@@ -1,9 +1,15 @@
 const { EmbedBuilder } = require('discord.js');
 const { getConfig } = require('../../utils/config');
+const { recordMemberCount } = require('../../utils/database');
 
 module.exports = function registerGuildMemberAdd(client) {
   client.on('guildMemberAdd', async (member) => {
     try {
+      // Alimenta o gráfico de crescimento de membros da Web UI
+      // stats não podem rebentar o fluxo de entrada, mas também não podem
+      // desaparecer em silêncio
+      try { recordMemberCount(member.guild.id, member.guild.memberCount); } catch (e) { console.warn('[STATS] Instantâneo de membros (entrada) falhou:', e.message); }
+
       const config = getConfig();
       const modules = config.modules || {};
       if (modules.welcome === false) return;

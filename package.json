@@ -3,21 +3,17 @@
   "version": "1.0.0",
   "description": "Discord Bot com Web UI, Mensagens de Boas-Vindas/Saída e Canais de Voz Dinâmicos Clonados",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=22.22.2"
+  },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "verify": "node scripts/verify.js"
   },
-  "keywords": [
-    "discord",
-    "bot",
-    "web-ui",
-    "join-to-create",
-    "temp-voice"
-  ],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
+    "@distube/youtube": "^1.1.0",
     "body-parser": "^1.20.3",
     "canvas": "^3.2.3",
     "cors": "^2.8.5",
@@ -34,5 +30,14 @@
     "node-cron": "^3.0.3",
     "rss-parser": "^3.13.0",
     "sql.js": "^1.12.0"
-  }
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "web-ui",
+    "join-to-create",
+    "temp-voice"
+  ],
+  "author": "",
+  "license": "ISC"
 }

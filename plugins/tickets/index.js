@@ -1,10 +1,66 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 const { getConfig } = require('../../src/utils/config');
-const { createTicket, closeTicket, getUserOpenTicket } = require('../../src/utils/database');
+const { createTicket, closeTicket, getUserOpenTicket, getOpenTickets } = require('../../src/utils/database');
 
 function init(client) {
   console.log('[TICKETS] Plugin inicializado.');
 }
+
+// Recolhe as mensagens do ticket (até ~1000, paginadas) e envia a transcrição
+// para o canal de logs configurado.
+// Devolve true (enviado), false (configurado mas falhou) ou null (não configurado).
+async function sendTranscript(guild, channel, ticketsConfig, closedBy) {
+  if (!ticketsConfig.logChannelId) return null;
+
+  const logChannel = guild.channels.cache.get(ticketsConfig.logChannelId) ||
+    await guild.channels.fetch(ticketsConfig.logChannelId).catch(() => null);
+  if (!logChannel || !logChannel.isTextBased()) {
+    console.error('[TICKETS] Canal de logs configurado não existe/não é de texto; transcrição não enviada.');
+    return false;
+  }
+
+  try {
+    // Paginação: o fetch do Discord devolve no máximo 100 por pedido
+    const collected = new Map();
+    let before = undefined;
+    for (let page = 0; page < 10; page++) {
+      const batch = await channel.messages.fetch(before ? { limit: 100, before } : { limit: 100 });
+      if (batch.size === 0) break;
+      for (const m of batch.values()) collected.set(m.id, m);
+      if (batch.size < 100) break;
+      before = batch.last().id;
+    }
+
+    const lines = [...collected.values()]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map(m => {
+        const attachments = m.attachments && m.attachments.size
+          ? ` [anexos: ${[...m.attachments.values()].map(a => a.name).join(', ')}]`
+          : '';
+        return `[${m.createdAt.toISOString()}] ${m.author?.tag ?? 'desconhecido'}: ${m.content || '*sem texto*'}${attachments}`;
+      });
+
+    const text = lines.join('\n') || 'Ticket sem mensagens.';
+    const safeName = (channel.name || 'ticket').replace(/[^a-z0-9-]/gi, '_');
+    const attachment = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `${safeName}-transcript.txt` });
+
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle('🎫 Ticket Fechado')
+      .setDescription(`Transcrição de **#${channel.name}** (${lines.length} mensagens${collected.size >= 1000 ? ', limite de 1000 atingido' : ''}).`)
+      .setFooter({ text: `Fechado por ${closedBy?.tag ?? 'desconhecido'}` })
+      .setTimestamp();
+
+    await logChannel.send({ embeds: [embed], files: [attachment] });
+    return true;
+  } catch (err) {
+    console.error('[TICKETS] Erro ao enviar transcrição:', err.message);
+    return false;
+  }
+}
+
+// Evita dois fechos do mesmo canal em simultâneo
+const closing = new Set();
 
 const commands = [
   new SlashCommandBuilder()
@@ -47,20 +103,85 @@ const events = {
         return interaction.reply({ content: 'Este comando só pode ser usado num canal de ticket.', ephemeral: true });
       }
 
-      try {
-        closeTicket(interaction.channel.id);
-        await interaction.reply('🔒 A fechar este ticket em 5 segundos...');
+      const channelId = interaction.channel.id;
+      if (closing.has(channelId)) {
+        return interaction.reply({ content: 'Este ticket já está a ser fechado.', ephemeral: true });
+      }
+      closing.add(channelId);
 
+      // Só o autor do ticket ou a equipa de suporte o pode fechar. Sem registo
+      // aberto na BD, só a equipa de suporte — caso contrário qualquer membro
+      // conseguia apagar um canal chamado "ticket-*".
+      const ticket = getOpenTickets(interaction.guild.id).find(t => t.channel_id === channelId);
+      const isSupport = interaction.member.permissions.has(PermissionFlagsBits.ManageChannels) ||
+        (ticketsConfig.supportRoleId && interaction.member.roles.cache.has(ticketsConfig.supportRoleId));
+
+      if (!ticket && !isSupport) {
+        closing.delete(channelId);
+        return interaction.reply({ content: 'Este canal não corresponde a um ticket aberto; apenas a equipa de suporte o pode fechar.', ephemeral: true });
+      }
+      if (ticket && ticket.user_id !== interaction.user.id && !isSupport) {
+        closing.delete(channelId);
+        return interaction.reply({ content: 'Apenas quem abriu o ticket (ou a equipa de suporte) o pode fechar.', ephemeral: true });
+      }
+
+      // A trava é libertada no fim, exceto quando o fecho ficou ao cuidado do
+      // setTimeout (durante os 5 s um segundo /ticket-close não pode entrar)
+      let closingHeldByTimeout = false;
+
+      try {
+        await interaction.deferReply();
+
+        // 1) Transcrição primeiro: se falhar, nada é alterado (canal e registo
+        // ficam abertos para uma nova tentativa). A resposta pública só sai depois
+        // de a transcrição estar garantida — "a fechar em 5 segundos" antes disso
+        // ficava a mentir quando a transcrição falhava.
+        const transcript = await sendTranscript(interaction.guild, interaction.channel, ticketsConfig, interaction.user);
+        if (transcript === false) {
+          await interaction.editReply({
+            content: '⚠️ Não consegui enviar a transcrição para o canal de logs. O ticket **não foi fechado** para não perder o conteúdo — corrige o canal de logs e volta a tentar.'
+          });
+          return;
+        }
+
+        // 2) Só depois marca fechado na BD. Sem registo aberto na BD (canal
+        // criado à mão) o UPDATE não altera linhas, e isso não é uma falha — só a
+        // equipa de suporte chega a esse caminho.
+        const persisted = closeTicket(channelId);
+        if (!persisted) {
+          await interaction.editReply({
+            content: '⚠️ A transcrição foi enviada, mas a base de dados não registou o fecho. O canal **não foi apagado** — volta a tentar.'
+          });
+          return;
+        }
+
+        // 3) Agenda o apagamento JÁ: se a edição da resposta falhar, o fecho não
+        // fica pela metade nem a trava fica presa até ao reinício
+        closingHeldByTimeout = true;
         setTimeout(async () => {
           try {
             await interaction.channel.delete();
           } catch (err) {
             console.error('[TICKETS] Erro ao apagar canal de ticket:', err.message);
+          } finally {
+            closing.delete(channelId);
           }
         }, 5000);
+
+        const diskWarning = persisted.persisted === false
+          ? '\n⚠️ Não consegui gravar a base de dados em disco — se o processo reiniciar, o ticket pode voltar a aparecer aberto.'
+          : '';
+        await interaction.editReply(`🔒 A fechar este ticket em 5 segundos...${diskWarning}`)
+          .catch(err => console.error('[TICKETS] Falha ao atualizar a resposta do fecho:', err.message));
       } catch (err) {
         console.error('[TICKETS] Erro ao fechar ticket:', err.message);
-        await interaction.reply({ content: 'Erro ao fechar ticket.', ephemeral: true });
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: 'Erro ao fechar ticket.', ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.reply({ content: 'Erro ao fechar ticket.', ephemeral: true }).catch(() => {});
+        }
+      } finally {
+        if (!closingHeldByTimeout) closing.delete(channelId);
       }
     }
 
@@ -68,16 +189,40 @@ const events = {
       const config = getConfig();
       const ticketsConfig = config.tickets || {};
 
-      const existing = getUserOpenTicket(interaction.guild.id, interaction.user.id);
-      if (existing) {
-        return interaction.reply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.', ephemeral: true });
+      // Há chamadas à rede antes de poder responder (procurar o canal antigo,
+      // criar o novo, aplicar overwrites): diferimos já, em efémero, senão a
+      // interação expira e o clique fica sem resposta visível.
+      try {
+        await interaction.deferReply({ ephemeral: true });
+      } catch (err) {
+        console.error('[TICKETS] Falha ao confirmar o pedido de abertura:', err.message);
+        return;
       }
 
+      const existing = getUserOpenTicket(interaction.guild.id, interaction.user.id);
+      if (existing) {
+        // Se o canal foi apagado à mão, o registo ficava "open" para sempre e o
+        // utilizador nunca mais conseguia abrir um ticket. Só fechamos quando o
+        // Discord confirma que o canal não existe (10003): um erro transitório ou
+        // de permissões não pode fechar um ticket real.
+        const existingChannel = await interaction.guild.channels.fetch(existing.channel_id)
+          .catch(err => (err && err.code === 10003 ? null : undefined));
+
+        if (existingChannel === null) {
+          closeTicket(existing.channel_id);
+        } else if (existingChannel) {
+          return interaction.editReply({ content: 'Já tens um ticket aberto. Fecha-o antes de abrir outro.' });
+        } else {
+          return interaction.editReply({ content: 'Não consegui confirmar o teu ticket aberto (erro temporário). Tenta outra vez.' });
+        }
+      }
+
+      let ticketChannel = null;
       try {
         const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30);
         const parentId = ticketsConfig.categoryId || null;
 
-        const ticketChannel = await interaction.guild.channels.create({
+        ticketChannel = await interaction.guild.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
           parent: parentId,
@@ -95,7 +240,15 @@ const events = {
           });
         }
 
-        createTicket(interaction.guild.id, ticketChannel.id, interaction.user.id);
+        const created = createTicket(interaction.guild.id, ticketChannel.id, interaction.user.id);
+        if (!created) {
+          // Sem registo, o canal ficava órfão (e /ticket-close não o tratava):
+          // desfazemos o canal em vez de deixar um ticket invisível
+          await ticketChannel.delete('Registo do ticket falhou.').catch(() => {});
+          return interaction.editReply({
+            content: 'Não consegui registar o ticket na base de dados — o canal foi removido. Tenta outra vez.'
+          });
+        }
 
         const embed = new EmbedBuilder()
           .setColor('#5865F2')
@@ -104,10 +257,17 @@ const events = {
           .setTimestamp();
 
         await ticketChannel.send({ content: `<@${interaction.user.id}> ${ticketsConfig.supportRoleId ? `<@&${ticketsConfig.supportRoleId}>` : ''}`, embeds: [embed] });
-        await interaction.reply({ content: `Ticket criado: ${ticketChannel}`, ephemeral: true });
+        await interaction.editReply({ content: `Ticket criado: ${ticketChannel}` });
       } catch (err) {
         console.error('[TICKETS] Erro ao criar ticket:', err.message);
-        await interaction.reply({ content: 'Erro ao criar ticket. Verifica as permissões do bot.', ephemeral: true });
+        // Se o canal já foi criado, há que dizê-lo: sem isto ficava um canal de
+        // suporte aberto com uma mensagem a dizer que tudo falhou
+        const note = ticketChannel ? ` O canal ${ticketChannel} chegou a ser criado — usa \`/ticket-close\` para o fechar.` : '';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: `Erro ao criar ticket. Verifica as permissões do bot.${note}` }).catch(() => {});
+        } else {
+          await interaction.reply({ content: 'Erro ao criar ticket. Verifica as permissões do bot.', ephemeral: true }).catch(() => {});
+        }
       }
     }
   }

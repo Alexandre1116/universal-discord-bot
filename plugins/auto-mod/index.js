@@ -1,5 +1,5 @@
 const { getConfig } = require('../../src/utils/config');
-const { addWarning } = require('../../src/utils/database');
+const { addWarning, getWarnings } = require('../../src/utils/database');
 
 const spamTracker = new Map();
 const SPAM_WINDOW = 5000;
@@ -7,19 +7,81 @@ const SPAM_THRESHOLD = 5;
 
 function init(client) {
   console.log('[AUTO-MOD] Plugin inicializado.');
+
+  // o spamTracker ganha uma entrada por pessoa que fala; sem varrer, fica tudo
+  // cá desde o arranque. A janela é de segundos, por isso o que está fora dela
+  // pode ir fora.
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const [key, stamps] of spamTracker.entries()) {
+      if (!stamps.length || now - stamps[stamps.length - 1] > SPAM_WINDOW) spamTracker.delete(key);
+    }
+  }, 60000);
+  if (typeof sweep.unref === 'function') sweep.unref();
 }
 
 function isStaff(member) {
-  return member.permissions.has('ManageMessages') || member.permissions.has('Administrator');
+  if (!member || !member.permissions) return false;
+  return member.permissions.has('Administrator')
+    || member.permissions.has('ManageMessages')
+    || member.permissions.has('ModerateMembers');
+}
+
+// Aceita durações legíveis ('10m', '1h') e milissegundos; máx. 28 dias
+function parseDuration(value, fallbackMs = 24 * 60 * 60 * 1000) {
+  if (typeof value === 'number' && value > 0) return Math.min(value, 28 * 24 * 60 * 60 * 1000);
+  if (typeof value === 'string' && value.trim()) {
+    const units = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+    const match = value.trim().toLowerCase().match(/^(\d+)\s*([smhd])?$/);
+    if (match) {
+      const amount = parseInt(match[1], 10);
+      const mult = units[match[2] || 'm'] || 60000;
+      return Math.min(amount * mult, 28 * 24 * 60 * 60 * 1000);
+    }
+  }
+  return fallbackMs;
+}
+
+// Devolve o que foi APLICADO, ou null quando o bot não tem permissões para tal
+// (não anuncio uma sanção que não aconteceu)
+async function applyStrikeAction(member, modConfig, reason) {
+  const action = modConfig.strikeAction || 'mute';
+
+  if (action === 'kick') {
+    if (!member.kickable) return null;
+    await member.kick(reason);
+    return 'expulso';
+  }
+
+  if (action === 'ban') {
+    if (!member.bannable) return null;
+    await member.ban({ reason });
+    return 'banido';
+  }
+
+  // mute: usar timeout nativo sempre que possível
+  if (member.moderatable) {
+    await member.timeout(parseDuration(modConfig.muteDuration), reason);
+    return 'silenciado';
+  }
+
+  // fallback: cargo "Muted" gerido manualmente
+  const muteRole = member.guild.roles.cache.find(r => r.name === 'Muted');
+  if (muteRole && !member.roles.cache.has(muteRole.id)) {
+    await member.roles.add(muteRole);
+    return 'silenciado (cargo Muted)';
+  }
+
+  return null;
 }
 
 const events = {
   messageCreate: async (client, message) => {
-    if (message.author.bot || !message.guild) return;
+    if (message.author.bot || !message.guild || !message.content) return;
 
     const config = getConfig();
     const modConfig = config.moderation || {};
-    if (modConfig.enabled === false) return;
+    if (!modConfig.enabled) return;
 
     const member = message.member;
     if (!member || isStaff(member)) return;
@@ -44,7 +106,10 @@ const events = {
     }
 
     if (!violated && modConfig.antiLinks) {
-      const urlPattern = /https?:\/\/[^\s]+/gi;
+      // melhor esforço: apanha URLs em geral e os convites Discord mais
+      // comuns; encurtadores (dsc.gg, avort.io…) não são reconhecidos — para
+      // filtros de convite fiáveis usar o AutoMod nativo do Discord
+      const urlPattern = /https?:\/\/[^\s]+|discord\.(gg|me)\/[^\s]+|discord(?:app)?\.com\/invite\/[^\s]+/gi;
       const allowedChannels = modConfig.linkAllowedChannels || [];
       if (urlPattern.test(content) && !allowedChannels.includes(message.channel.id)) {
         violated = true;
@@ -54,7 +119,7 @@ const events = {
 
     if (!violated && modConfig.bannedWords && modConfig.bannedWords.length > 0) {
       const lowerContent = content.toLowerCase();
-      const found = modConfig.bannedWords.some(word => lowerContent.includes(word.toLowerCase()));
+      const found = modConfig.bannedWords.some(word => word && lowerContent.includes(word.toLowerCase()));
       if (found) {
         violated = true;
         reason = 'Uso de palavras proibidas';
@@ -72,43 +137,34 @@ const events = {
       }
     }
 
-    if (violated) {
+    if (!violated) return;
+
+    try {
       try {
         await message.delete();
-
-        addWarning(message.guild.id, message.author.id, client.user.id, reason);
-
-        const maxStrikes = modConfig.maxStrikes || 3;
-        const { getWarnings } = require('../../src/utils/database');
-        const warnings = getWarnings(message.guild.id, message.author.id);
-
-        if (warnings.length >= maxStrikes) {
-          const action = modConfig.strikeAction || 'mute';
-          if (action === 'kick') {
-            await message.member.kick(reason);
-          } else if (action === 'ban') {
-            await message.member.ban({ reason });
-          } else {
-            let muteRole = message.guild.roles.cache.find(r => r.name === 'Muted');
-            if (!muteRole) {
-              muteRole = await message.guild.roles.create({ name: 'Muted', permissions: [] });
-              message.guild.channels.cache.forEach(async (ch) => {
-                if (ch.isTextBased()) {
-                  await ch.permissionOverwrites.create(muteRole, { SendMessages: false });
-                }
-              });
-            }
-            await message.member.roles.add(muteRole);
-          }
-          await message.channel.send(`⚠️ <@${message.author.id}> foi punido por atingir o limite de avisos.`)
-            .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-        } else {
-          await message.channel.send(`⚠️ <@${message.author.id}> ${reason}. Aviso ${warnings.length}/${maxStrikes}.`)
-            .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
-        }
-      } catch (err) {
-        console.error('[AUTO-MOD] Erro ao processar moderacão:', err.message);
+      } catch (deleteErr) {
+        console.warn('[AUTO-MOD] Sem permissão para apagar a mensagem:', deleteErr.message);
       }
+
+      addWarning(message.guild.id, message.author.id, client.user.id, reason);
+      const maxStrikes = modConfig.maxStrikes || 3;
+      const warnings = getWarnings(message.guild.id, message.author.id);
+
+      if (warnings.length >= maxStrikes) {
+        const outcome = await applyStrikeAction(member, modConfig, reason);
+        const text = outcome
+          ? `⚠️ <@${message.author.id}> foi **${outcome}** por atingir o limite de avisos (${warnings.length}/${maxStrikes}).`
+          : `⚠️ <@${message.author.id}> atingiu o limite de avisos (${warnings.length}/${maxStrikes}), mas não tenho permissões para aplicar a punição configurada.`;
+        await message.channel.send({ content: text })
+          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
+          .catch(() => {});
+      } else {
+        await message.channel.send({ content: `⚠️ <@${message.author.id}> ${reason}. Aviso ${warnings.length}/${maxStrikes}.` })
+          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.error('[AUTO-MOD] Erro ao processar moderação:', err.message);
     }
   }
 };
